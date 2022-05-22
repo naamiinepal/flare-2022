@@ -1,0 +1,55 @@
+seed_everything: 42
+trainer:
+  logger:
+    - class_path: pytorch_lightning.loggers.WandbLogger
+      init_args:
+          project: flare
+          name: unet-bigger
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        save_top_k: 10
+        monitor: val_loss
+        mode: min
+        dirpath: checkpoints
+        save_weights_only: True
+        filename: "unet-bigger-{epoch:02d}-{val_loss:.2f}"
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+    - class_path: pytorch_lightning.callbacks.EarlyStopping
+      init_args:
+        monitor: val_loss
+        patience: 5
+  devices: [1]
+  max_epochs: 600
+  accelerator: "gpu"
+  strategy: null
+  log_every_n_steps: 5
+model:
+  model_channels:
+  - 8
+  - 16
+  - 32
+  - 64
+  - 128
+  - 256
+  model_strides:
+  - 2
+  - 2
+  - 2
+  - 2
+  - 2
+  learning_rate: 0.001
+  sw_batch_size: 4
+  sw_overlap: 0.1
+  plateu_patience: 2
+  plateu_factor: 0.1
+data:
+  val_ratio: 0.2
+  crop_num_samples: 4
+  batch_size: 8
+  cache_ds: true
+  max_workers: 4
+  roi_size:
+    - 128
+    - 128
+    - 64

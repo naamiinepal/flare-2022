@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 import numpy as np
 import pytorch_lightning as pl
@@ -6,10 +6,8 @@ import torch
 from monai.inferers import sliding_window_inference
 from monai.losses import DiceLoss
 from monai.metrics import DiceMetric
-from monai.networks.nets import UNet
 from monai.transforms import AsDiscrete
-
-from datamodule import FlareDataModule
+from torch import nn
 
 NdarrayOrTensor = Union[np.ndarray, torch.Tensor]
 
@@ -17,8 +15,7 @@ NdarrayOrTensor = Union[np.ndarray, torch.Tensor]
 class Segmentor(pl.LightningModule):
     def __init__(
         self,
-        model_channels: Tuple[int, ...] = (16, 32, 64, 128, 256),
-        model_strides: Tuple[int, ...] = (2, 2, 2, 2),
+        model: nn.Module,
         learning_rate: float = 1e-4,
         sw_batch_size: int = 4,
         sw_overlap: float = 0.1,
@@ -28,23 +25,13 @@ class Segmentor(pl.LightningModule):
     ):
         super().__init__()
 
-        self.save_hyperparameters()
-
-        self.model = UNet(
-            spatial_dims=3,
-            in_channels=1,
-            out_channels=FlareDataModule.NUM_LABELS + 1,
-            channels=model_channels,
-            strides=model_strides,
-            num_res_units=2,
-            norm="batch",
-            bias=False,  # no need for bias for batch norm
-        )
+        self.save_hyperparameters(ignore="model")
+        self.model = model
 
         self.criterion = DiceLoss(to_onehot_y=True, softmax=True)
 
-        self.post_pred = AsDiscrete(argmax=True, to_onehot=self.model.out_channels)
-        self.post_label = AsDiscrete(to_onehot=self.model.out_channels)
+        self.post_pred = AsDiscrete(argmax=True, to_onehot=model.out_channels)
+        self.post_label = AsDiscrete(to_onehot=model.out_channels)
 
         self.dice_metric = DiceMetric(include_background=False)
 

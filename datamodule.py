@@ -1,9 +1,16 @@
+import math
 import os.path
 from glob import glob
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import pytorch_lightning as pl
-from monai.data import CacheDataset, DataLoader, Dataset
+from monai.data import (
+    CacheDataset,
+    DataLoader,
+    Dataset,
+    PersistentDataset,
+    list_data_collate,
+)
 from monai.transforms import (
     Compose,
     CropForegroundd,
@@ -16,16 +23,15 @@ from monai.transforms import (
 from sklearn.model_selection import train_test_split
 
 
-class FlareDataModule(pl.LightningDataModule):
-
-    NUM_LABELS = 13
-
+class DataModule(pl.LightningDataModule):
     def __init__(
         self,
+        supervised_dir: str,
+        num_labels_with_bg: int,
         val_ratio: float = 0.2,
         crop_num_samples: int = 4,
         batch_size: int = 16,
-        cache_ds: bool = True,
+        ds_cache_type: Optional[Literal["mem", "disk"]] = "mem",
         max_workers: int = 4,
         roi_size: Tuple[int, int, int] = (128, 128, 64),
         **kwargs
@@ -34,14 +40,9 @@ class FlareDataModule(pl.LightningDataModule):
 
         self._dict_keys = ("image", "label")
 
-        data_dir = "/mnt/HDD2/flare2022/datasets/FLARE2022"
-        self.supervised_dir = os.path.join(
-            data_dir, "Training", "FLARE22_LabeledCase50"
-        )
+        self.save_hyperparameters()
 
         self.num_workers = min(os.cpu_count(), max_workers)
-
-        self.save_hyperparameters()
 
     def setup(self, stage: Optional[str] = None):
         if stage is None or stage == "fit":
@@ -62,7 +63,7 @@ class FlareDataModule(pl.LightningDataModule):
                     label_key="label",
                     spatial_size=self.hparams.roi_size,
                     num_samples=self.hparams.crop_num_samples,
-                    num_classes=self.NUM_LABELS + 1,
+                    num_classes=self.hparams.num_labels_with_bg,
                 ),
                 # user can also add other random transforms
                 #                     RandAffined(
@@ -82,7 +83,9 @@ class FlareDataModule(pl.LightningDataModule):
     def train_dataloader(self):
         return DataLoader(
             self.train_ds,
-            batch_size=self.hparams.batch_size // self.hparams.crop_num_samples,
+            batch_size=math.ceil(
+                self.hparams.batch_size / self.hparams.crop_num_samples
+            ),
             num_workers=self.num_workers,
             shuffle=True,
             pin_memory=True,
@@ -97,7 +100,9 @@ class FlareDataModule(pl.LightningDataModule):
         )
 
     def get_image_paths(self, baseDir: str):
-        image_paths = glob(os.path.join(self.supervised_dir, baseDir, "*.nii.gz"))
+        image_paths = glob(
+            os.path.join(self.hparams.supervised_dir, baseDir, "*.nii.gz")
+        )
         image_paths.sort()
         return image_paths
 
@@ -121,8 +126,12 @@ class FlareDataModule(pl.LightningDataModule):
         )
 
     def get_dataset(self, *dataset_args):
-        return (
-            CacheDataset(*dataset_args, num_workers=self.num_workers)
-            if self.hparams.cache_ds
-            else Dataset(*dataset_args)
-        )
+        if self.hparams.ds_cache_type == "mem":
+            return CacheDataset(*dataset_args, num_workers=self.num_workers)
+        elif self.hparams.ds_cache_type == "disk":
+            return PersistentDataset(
+                *dataset_args,
+                cache_dir=os.path.basename(self.hparams.supervised_dir) + "_datacache",
+                pickle_protocol=5
+            )
+        return Dataset(*dataset_args)

@@ -221,3 +221,4 @@ cython_debug/
 datasets
 wandb
 checkpoints
+*_datacache

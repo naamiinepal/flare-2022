@@ -1,6 +1,11 @@
 from pytorch_lightning.utilities.cli import LightningCLI
 
-from datamodule import FlareDataModule
+from datamodule import DataModule
 from model import Segmentor
 
-cli = LightningCLI(Segmentor, FlareDataModule, save_config_callback=None)
+cli = LightningCLI(
+    Segmentor,
+    DataModule,
+    save_config_callback=None,
+    parser_kwargs={"parser_mode": "omegaconf"},
+)
