@@ -9,7 +9,6 @@ from monai.data import (
     DataLoader,
     Dataset,
     PersistentDataset,
-    list_data_collate,
 )
 from monai.transforms import (
     Compose,
@@ -28,12 +27,14 @@ class DataModule(pl.LightningDataModule):
         self,
         supervised_dir: str,
         num_labels_with_bg: int,
+        predict_dir: Optional[str] = "",
         val_ratio: float = 0.2,
         crop_num_samples: int = 4,
         batch_size: int = 16,
-        ds_cache_type: Optional[Literal["mem", "disk"]] = "mem",
+        ds_cache_type: Optional[Literal["mem", "disk"]] = None,
         max_workers: int = 4,
         roi_size: Tuple[int, int, int] = (128, 128, 64),
+        pin_memory: bool = True,
         **kwargs
     ):
         super().__init__()
@@ -45,7 +46,7 @@ class DataModule(pl.LightningDataModule):
         self.num_workers = min(os.cpu_count(), max_workers)
 
     def setup(self, stage: Optional[str] = None):
-        if stage is None or stage == "fit":
+        if stage is None or stage == "fit" or stage == "validate":
             images = self.get_image_paths("images")
             labels = self.get_image_paths("labels")
 
@@ -57,28 +58,47 @@ class DataModule(pl.LightningDataModule):
                 data_dicts, test_size=self.hparams.val_ratio
             )
 
-            train_transforms = self.get_transform(
-                RandCropByLabelClassesd(
-                    keys=self._dict_keys,
-                    label_key="label",
-                    spatial_size=self.hparams.roi_size,
-                    num_samples=self.hparams.crop_num_samples,
-                    num_classes=self.hparams.num_labels_with_bg,
-                ),
-                # user can also add other random transforms
-                #                     RandAffined(
-                #                         keys=keys,
-                #                         mode=('bilinear', 'nearest'),
-                #                         prob=1.0,
-                #                         rotate_range=(0, 0, math.pi/15),
-                #                         scale_range=(0.1, 0.1, 0.1)
-                #                     )
-            )
+            if stage != "validate":
+                train_transforms = self.get_transform(
+                    RandCropByLabelClassesd(
+                        keys=self._dict_keys,
+                        label_key="label",
+                        spatial_size=self.hparams.roi_size,
+                        num_samples=self.hparams.crop_num_samples,
+                        num_classes=self.hparams.num_labels_with_bg,
+                    ),
+                    # user can also add other random transforms
+                    #                     RandAffined(
+                    #                         keys=keys,
+                    #                         mode=('bilinear', 'nearest'),
+                    #                         prob=1.0,
+                    #                         rotate_range=(0, 0, math.pi/15),
+                    #                         scale_range=(0.1, 0.1, 0.1)
+                    #                     )
+                )
+                self.train_ds = self.get_dataset(train_files, train_transforms)
+
             val_transforms = self.get_transform()
 
-            self.train_ds = self.get_dataset(train_files, train_transforms)
-
             self.val_ds = self.get_dataset(val_files, val_transforms)
+
+        if stage is None or stage == "predict":
+            pred_image_paths = glob(os.path.join(self.hparams.predict_dir, "*.nii.gz"))
+            pred_image_paths.sort()
+
+            pred_dicts = tuple({"image": img} for img in pred_image_paths)
+
+            keys = ("image",)
+            pred_transforms = Compose(
+                (
+                    LoadImaged(keys=keys),
+                    EnsureChannelFirstd(keys=keys),
+                    Orientationd(keys=keys, axcodes="RAS"),
+                    ToTensord(keys=keys),
+                ),
+            )
+
+            self.pred_ds = Dataset(pred_dicts, pred_transforms)
 
     def train_dataloader(self):
         return DataLoader(
@@ -88,7 +108,7 @@ class DataModule(pl.LightningDataModule):
             ),
             num_workers=self.num_workers,
             shuffle=True,
-            pin_memory=True,
+            pin_memory=self.hparams.pin_memory,
         )
 
     def val_dataloader(self):
@@ -96,7 +116,14 @@ class DataModule(pl.LightningDataModule):
             self.val_ds,
             batch_size=1,  # Because the images do not align and are not cropped
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.hparams.pin_memory,
+        )
+
+    def predict_dataloader(self):
+        return DataLoader(
+            self.pred_ds,
+            batch_size=1,  # Because the images do not align and are not cropped
+            num_workers=self.num_workers,
         )
 
     def get_image_paths(self, baseDir: str):

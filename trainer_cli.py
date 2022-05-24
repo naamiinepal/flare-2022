@@ -1,7 +1,7 @@
 from pytorch_lightning.utilities.cli import LightningCLI
 
 from datamodule import DataModule
-from model import Segmentor
+from segmentor import Segmentor
 
 cli = LightningCLI(
     Segmentor,

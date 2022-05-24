@@ -9,6 +9,8 @@ from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete
 from torch import nn
 
+from saver import NiftiSaver
+
 NdarrayOrTensor = Union[np.ndarray, torch.Tensor]
 
 
@@ -44,10 +46,6 @@ class Segmentor(pl.LightningModule):
 
         output = self(image)
 
-        self.compute_dice_score(output, label)
-
-        # self.log("train_dice_score", score, prog_bar=True)
-
         loss = self.criterion(output, label)
 
         self.log("train_loss", loss)
@@ -77,6 +75,28 @@ class Segmentor(pl.LightningModule):
         self.dice_metric.reset()
         self.log("val_dice_score", score, prog_bar=True)
 
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
+        image = batch["image"]
+
+        output = sliding_window_inference(
+            image,
+            self.roi_size,
+            self.hparams.sw_batch_size,
+            self,
+            overlap=self.hparams.sw_overlap,
+            device="cpu",
+        )
+
+        batch_meta_data = {
+            k: v.cpu() if isinstance(v, torch.Tensor) else v
+            for k, v in batch["image_meta_dict"].items()
+        }
+
+        for i, out in enumerate(output):
+            argmax_out = out.argmax(dim=0)
+            meta_data = {k: v[i] for k, v in batch_meta_data.items()}
+            self.saver(argmax_out, meta_data)
+
     def compute_dice_score(self, output: NdarrayOrTensor, label: NdarrayOrTensor):
         output = tuple(map(self.post_pred, output))
         labels = tuple(map(self.post_label, label))
@@ -99,5 +119,8 @@ class Segmentor(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def setup(self, stage: Optional[str] = None):
-        if stage is None or stage == "fit":
-            self.roi_size = self.trainer.datamodule.hparams.roi_size
+        self.roi_size = self.trainer.datamodule.hparams.roi_size
+        if stage == "predict":
+            self.saver = NiftiSaver(
+                "rabinadk1", output_postfix="", separate_folder=False, print_log=False
+            )
