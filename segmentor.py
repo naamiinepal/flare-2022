@@ -68,7 +68,7 @@ class Segmentor(pl.LightningModule):
 
         loss = self.criterion(output, label)
 
-        self.log("val_loss", loss, batch_size=1)
+        self.log("val_loss", loss, batch_size=1, prog_bar=True)
 
     def validation_epoch_end(self, outputs):
         score = self.dice_metric.aggregate()

@@ -6,17 +6,15 @@ from pytorch_lightning import Trainer
 from datamodule import DataModule
 from segmentor import Segmentor
 
-checkpoint_path = "playground/checkpoints/unet-l6-s4-epoch=26-val_loss=0.50.ckpt"
+checkpoint_path = "playground/checkpoints/unet-l6-s2-epoch=20-val_loss=0.49.ckpt"
 
 base_model = UNet(
     spatial_dims=3,
     in_channels=1,
     out_channels=5,
-    channels=(4, 8, 16, 32, 64, 128),
+    channels=(2, 4, 8, 16, 32, 64),
     strides=(2, 2, 2, 2, 2),
     num_res_units=3,
-    norm="batch",
-    bias=False,
 )
 
 model = Segmentor.load_from_checkpoint(

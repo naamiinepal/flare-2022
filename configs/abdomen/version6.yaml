@@ -4,22 +4,22 @@ trainer:
     class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
         project: abdomen
-        name: unet-l6-s2-instance
+        name: unet-l5-s4-instance
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         save_top_k: 10
-        monitor: val_loss
+        monitor: val_dice_score
         mode: min
         dirpath: playground/checkpoints
         save_weights_only: True
-        filename: "unet-l6-s2-{epoch:02d}-{val_loss:.2f}"
+        filename: "unet-l5-s4-instance-{epoch:02d}-{val_loss:.2f}"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         monitor: val_loss
         patience: 6
-  devices: [0]
+  devices: [1]
   max_epochs: 100
   accelerator: "gpu"
   strategy: null
@@ -31,9 +31,10 @@ model:
       spatial_dims: 3
       in_channels: 1
       out_channels: ${data.num_labels_with_bg}
-      channels: [2, 4, 8, 16, 32, 64]
-      strides: [2, 2, 2, 2, 2]
-      num_res_units: 3
+      channels: [4, 8, 16, 32, 64]
+      strides: [2, 2, 2, 2]
+      num_res_units: 2
+      act: relu
   learning_rate: 0.05
   sw_batch_size: 8
   sw_overlap: 0.1

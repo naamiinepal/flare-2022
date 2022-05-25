@@ -15,7 +15,8 @@ from monai.transforms import (
     CropForegroundd,
     EnsureChannelFirstd,
     LoadImaged,
-    Orientationd,
+    # Orientationd,
+    NormalizeIntensityd,
     RandCropByLabelClassesd,
     ToTensord,
 )
@@ -88,12 +89,13 @@ class DataModule(pl.LightningDataModule):
 
             pred_dicts = tuple({"image": img} for img in pred_image_paths)
 
-            keys = ("image",)
+            keys = "image"
             pred_transforms = Compose(
                 (
                     LoadImaged(keys=keys),
                     EnsureChannelFirstd(keys=keys),
-                    Orientationd(keys=keys, axcodes="RAS"),
+                    # Orientationd(keys=keys, axcodes="RAS"),
+                    NormalizeIntensityd(keys="image"),
                     ToTensord(keys=keys),
                 ),
             )
@@ -139,7 +141,7 @@ class DataModule(pl.LightningDataModule):
             (
                 LoadImaged(keys=keys),
                 EnsureChannelFirstd(keys=keys),
-                Orientationd(keys=keys, axcodes="RAS"),
+                # Orientationd(keys=keys, axcodes="RAS"),
                 #         Spacingd(keys=keys, pixdim=(
                 #             1.5, 1.5, 2.0), mode=("bilinear", "nearest")),
                 #         ScaleIntensityRanged(
@@ -147,6 +149,7 @@ class DataModule(pl.LightningDataModule):
                 #             b_min=0.0, b_max=1.0, clip=True,
                 #         ),
                 CropForegroundd(keys=keys, source_key="image"),
+                NormalizeIntensityd(keys="image"),
                 *random_transforms,
                 ToTensord(keys=keys),
             )

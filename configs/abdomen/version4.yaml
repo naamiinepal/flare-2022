@@ -4,16 +4,16 @@ trainer:
     class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
         project: abdomen
-        name: unet-l6-s2-instance
+        name: unet-l6-s2-instance-intnorm
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         save_top_k: 10
-        monitor: val_loss
-        mode: min
+        monitor: val_dice_score
+        mode: max
         dirpath: playground/checkpoints
         save_weights_only: True
-        filename: "unet-l6-s2-{epoch:02d}-{val_loss:.2f}"
+        filename: "unet-l6-s2-instance-intnorm-{epoch:02d}-{val_loss:.2f}"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:

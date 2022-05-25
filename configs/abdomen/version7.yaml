@@ -4,7 +4,7 @@ trainer:
     class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
         project: abdomen
-        name: unet-l6-s2-instance
+        name: unet-l6-s4-r0
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
@@ -13,13 +13,13 @@ trainer:
         mode: min
         dirpath: playground/checkpoints
         save_weights_only: True
-        filename: "unet-l6-s2-{epoch:02d}-{val_loss:.2f}"
+        filename: "unet-l6-s4-r0-{epoch:02d}-{val_loss:.2f}"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         monitor: val_loss
-        patience: 6
-  devices: [0]
+        patience: 5
+  devices: [1]
   max_epochs: 100
   accelerator: "gpu"
   strategy: null
@@ -31,11 +31,10 @@ model:
       spatial_dims: 3
       in_channels: 1
       out_channels: ${data.num_labels_with_bg}
-      channels: [2, 4, 8, 16, 32, 64]
+      channels: [4, 8, 16, 32, 64, 128]
       strides: [2, 2, 2, 2, 2]
-      num_res_units: 3
   learning_rate: 0.05
-  sw_batch_size: 8
+  sw_batch_size: 16
   sw_overlap: 0.1
   plateu_patience: 2
   plateu_factor: 0.1
@@ -43,7 +42,7 @@ data:
   supervised_dir: /mnt/HDD2/flare2022/datasets/AbdomenCT-1K/Subtask1
   num_labels_with_bg: 5
   val_ratio: 0.2
-  crop_num_samples: 8
+  crop_num_samples: 16
   batch_size: 32
   ds_cache_type: disk
   max_workers: 4
