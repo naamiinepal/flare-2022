@@ -219,8 +219,11 @@ cython_debug/
 
 # Extras
 wandb
-cehckpoints
+checkpoints
 datasets
+notebooks
+submissions
+*_datacache
 *.zip
 *.gz
 *.ckpt

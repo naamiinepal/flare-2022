@@ -17,7 +17,9 @@ from saver import NiftiSaver
 
 
 def main(params):
-    model = torch.jit.load("abdomen_checkpoint.pt").eval()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = torch.jit.load("abdomen_checkpoint.pt", map_location=device).eval()
 
     pred_image_paths = glob(os.path.join(params.predict_dir, "*.nii.gz"))
 
@@ -49,7 +51,6 @@ def main(params):
         num_workers=params.num_workers,
     )
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     with torch.inference_mode():
         for batch in dl:
