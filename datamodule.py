@@ -22,13 +22,16 @@ from monai.transforms import (
 )
 from sklearn.model_selection import train_test_split
 
+from saver import NiftiSaver
+
 
 class DataModule(pl.LightningDataModule):
     def __init__(
         self,
-        supervised_dir: str,
-        num_labels_with_bg: int,
-        predict_dir: Optional[str] = "",
+        num_labels_with_bg: Optional[int] = None,
+        supervised_dir: str = ".",
+        predict_dir: str = ".",
+        output_dir: str = ".",
         val_ratio: float = 0.2,
         crop_num_samples: int = 4,
         batch_size: int = 16,
@@ -60,6 +63,10 @@ class DataModule(pl.LightningDataModule):
             )
 
             if stage != "validate":
+                assert (
+                    self.hparams.num_labels_with_bg is not None
+                ), "Number of Labels is needed for training"
+
                 train_transforms = self.get_transform(
                     RandCropByLabelClassesd(
                         keys=self._dict_keys,
@@ -101,6 +108,13 @@ class DataModule(pl.LightningDataModule):
             )
 
             self.pred_ds = Dataset(pred_dicts, pred_transforms)
+
+            self.saver = NiftiSaver(
+                self.hparams.output_dir,
+                output_postfix="",
+                separate_folder=False,
+                print_log=False,
+            )
 
     def train_dataloader(self):
         return DataLoader(

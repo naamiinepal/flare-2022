@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 
 import numpy as np
 import pytorch_lightning as pl
@@ -8,8 +8,6 @@ from monai.losses import DiceLoss
 from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete
 from torch import nn
-
-from saver import NiftiSaver
 
 NdarrayOrTensor = Union[np.ndarray, torch.Tensor]
 
@@ -119,8 +117,10 @@ class Segmentor(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def setup(self, stage: Optional[str] = None):
-        self.roi_size = self.trainer.datamodule.hparams.roi_size
+        datamodule = self.trainer.datamodule
+        self.roi_size = datamodule.hparams.roi_size
         if stage == "predict":
-            self.saver = NiftiSaver(
-                "rabinadk1", output_postfix="", separate_folder=False, print_log=False
-            )
+            self.saver = datamodule.saver
+
+    def save_scripted(self, path: str):
+        torch.jit.script(self.model).save(path)

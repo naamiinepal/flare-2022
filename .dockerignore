@@ -219,9 +219,11 @@ cython_debug/
 
 # Extras
 wandb
+cehckpoints
 datasets
-checkpoints
-*.ckpt
 *.zip
 *.gz
+*.ckpt
 *.pt
+
+!abdomen_checkpoint.pt
