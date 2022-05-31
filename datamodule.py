@@ -4,28 +4,22 @@ from glob import glob
 from typing import Literal, Optional, Tuple
 
 import pytorch_lightning as pl
-from monai.data import (
-    CacheDataset,
-    DataLoader,
-    Dataset,
-    PersistentDataset,
-)
+from monai.data import CacheDataset, DataLoader, Dataset, PersistentDataset
 from monai.transforms import (
     Compose,
     CropForegroundd,
     EnsureChannelFirstd,
     LoadImaged,
-    # Orientationd,
     NormalizeIntensityd,
     RandCropByLabelClassesd,
     ToTensord,
 )
-from sklearn.model_selection import train_test_split
-
-from saver import NiftiSaver
 
 
 class DataModule(pl.LightningDataModule):
+
+    _dict_keys = ("image", "label")
+
     def __init__(
         self,
         num_labels_with_bg: Optional[int] = None,
@@ -43,16 +37,16 @@ class DataModule(pl.LightningDataModule):
     ):
         super().__init__()
 
-        self._dict_keys = ("image", "label")
-
         self.save_hyperparameters()
 
         self.num_workers = min(os.cpu_count(), max_workers)
 
     def setup(self, stage: Optional[str] = None):
         if stage is None or stage == "fit" or stage == "validate":
-            images = self.get_image_paths("images")
-            labels = self.get_image_paths("labels")
+            from sklearn.model_selection import train_test_split
+
+            images = self.get_supervised_image_paths("images")
+            labels = self.get_supervised_image_paths("labels")
 
             data_dicts = tuple(
                 {"image": img, "label": lab} for img, lab in zip(images, labels)
@@ -91,6 +85,8 @@ class DataModule(pl.LightningDataModule):
             self.val_ds = self.get_dataset(val_files, val_transforms)
 
         if stage is None or stage == "predict":
+            from saver import NiftiSaver
+
             pred_image_paths = glob(os.path.join(self.hparams.predict_dir, "*.nii.gz"))
             pred_image_paths.sort()
 
@@ -101,7 +97,6 @@ class DataModule(pl.LightningDataModule):
                 (
                     LoadImaged(keys=keys),
                     EnsureChannelFirstd(keys=keys),
-                    # Orientationd(keys=keys, axcodes="RAS"),
                     NormalizeIntensityd(keys="image"),
                     ToTensord(keys=keys),
                 ),
@@ -142,26 +137,20 @@ class DataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
         )
 
-    def get_image_paths(self, baseDir: str):
+    def get_supervised_image_paths(self, baseDir: str):
         image_paths = glob(
             os.path.join(self.hparams.supervised_dir, baseDir, "*.nii.gz")
         )
         image_paths.sort()
         return image_paths
 
-    def get_transform(self, *random_transforms):
-        keys = self._dict_keys
+    @staticmethod
+    def get_transform(*random_transforms):
+        keys = DataModule._dict_keys
         return Compose(
             (
                 LoadImaged(keys=keys),
                 EnsureChannelFirstd(keys=keys),
-                # Orientationd(keys=keys, axcodes="RAS"),
-                #         Spacingd(keys=keys, pixdim=(
-                #             1.5, 1.5, 2.0), mode=("bilinear", "nearest")),
-                #         ScaleIntensityRanged(
-                #             "image", a_min=-57, a_max=164,
-                #             b_min=0.0, b_max=1.0, clip=True,
-                #         ),
                 CropForegroundd(keys=keys, source_key="image"),
                 NormalizeIntensityd(keys="image"),
                 *random_transforms,

@@ -228,5 +228,6 @@ submissions
 *.gz
 *.ckpt
 *.pt
+*logs
 
 !abdomen_checkpoint.pt

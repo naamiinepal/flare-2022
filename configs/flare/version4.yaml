@@ -8,7 +8,7 @@ trainer:
         mode: min
         dirpath: checkpoints
         save_weights_only: True
-        filename: "unet-l6-s4-{epoch:02d}-{val_loss:.2f}"
+        filename: "unet-l6-s4-256-{epoch:02d}-{val_loss:.2f}"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
@@ -37,8 +37,8 @@ data:
   supervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50/
   num_labels_with_bg: 14
   val_ratio: 0.2
-  crop_num_samples: 16
-  batch_size: 32
+  crop_num_samples: 8
+  batch_size: 8
   ds_cache_type: mem
   max_workers: 4
-  roi_size: [128, 128, 64]
+  roi_size: [256, 256, 64]

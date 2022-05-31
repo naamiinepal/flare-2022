@@ -51,7 +51,6 @@ def main(params):
         num_workers=params.num_workers,
     )
 
-
     with torch.inference_mode():
         for batch in dl:
             image = batch["image"].to(device)
