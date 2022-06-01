@@ -14,7 +14,7 @@ from datamodule import DataModule
 class Segmentor(pl.LightningModule):
 
     val_dice_metric = DiceMetric(include_background=False)
-    criterion = DiceLoss(to_onehot_y=True, softmax=True)
+    criterion = DiceLoss(include_background=False, to_onehot_y=True, softmax=True)
 
     def __init__(
         self,
@@ -37,7 +37,10 @@ class Segmentor(pl.LightningModule):
 
     # Using custom or multiple metrics (default_hp_metric=False)
     def on_train_start(self):
-        self.logger.log_hyperparams(self.hparams, {"val/loss": 0, "val/dice_score": 0})
+        if self.logger:
+            self.logger.log_hyperparams(
+                self.hparams, {"val/loss": 0, "val/dice_score": 0}
+            )
 
     def training_step(self, batch, batch_idx):
         label = batch["label"]
