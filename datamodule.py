@@ -11,7 +11,12 @@ from monai.transforms import (
     EnsureChannelFirstd,
     LoadImaged,
     NormalizeIntensityd,
+    Rand3DElasticd,
+    RandAdjustContrastd,
     RandCropByLabelClassesd,
+    RandGaussianNoised,
+    RandGaussianSharpend,
+    RandScaleIntensityd,
     ToTensord,
 )
 
@@ -61,22 +66,38 @@ class DataModule(pl.LightningDataModule):
                     self.hparams.num_labels_with_bg is not None
                 ), "Number of Labels is needed for training"
 
+                keys = self._dict_keys
                 train_transforms = self.get_transform(
+                    Rand3DElasticd(
+                        keys=keys,
+                        sigma_range=(5, 7),
+                        magnitude_range=(50, 150),
+                        padding_mode="zeros",
+                        rotate_range=(math.pi / 6, math.pi / 6, math.pi / 6),
+                        scale_range=((0.7, 1.4), (0.7, 1.4), (0.7, 1.4)),
+                        prob=0.35,
+                        mode=("bilinear", "nearest"),
+                    ),
+                    RandGaussianNoised(
+                        keys="image",
+                        prob=0.15,
+                    ),
+                    RandGaussianSharpend(
+                        keys="image",
+                        sigma1_x=(0.5, 1.5),
+                        sigma1_y=(0.5, 1.5),
+                        sigma1_z=(0.5, 1.5),
+                        prob=0.2,
+                    ),
+                    RandScaleIntensityd(keys="image", factors=(0.65, 1.5), prob=0.15),
+                    RandAdjustContrastd(keys="image", gamma=(0.7, 1.5), prob=0.15),
                     RandCropByLabelClassesd(
-                        keys=self._dict_keys,
+                        keys=keys,
                         label_key="label",
                         spatial_size=self.hparams.roi_size,
                         num_samples=self.hparams.crop_num_samples,
                         num_classes=self.hparams.num_labels_with_bg,
                     ),
-                    # user can also add other random transforms
-                    #                     RandAffined(
-                    #                         keys=keys,
-                    #                         mode=('bilinear', 'nearest'),
-                    #                         prob=1.0,
-                    #                         rotate_range=(0, 0, math.pi/15),
-                    #                         scale_range=(0.1, 0.1, 0.1)
-                    #                     )
                 )
                 self.train_ds = self.get_dataset(train_files, train_transforms)
 
