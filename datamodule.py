@@ -129,7 +129,7 @@ class DataModule(pl.LightningDataModule):
             keys = "image"
             pred_transforms = Compose(
                 (
-                    LoadImaged(keys=keys),
+                    LoadImaged(keys=keys, reader="nibabelreader"),
                     EnsureChannelFirstd(keys=keys),
                     NormalizeIntensityd(keys="image"),
                     ToTensord(keys=keys),
@@ -183,7 +183,7 @@ class DataModule(pl.LightningDataModule):
         keys = DataModule._dict_keys
         return Compose(
             (
-                LoadImaged(keys=keys),
+                LoadImaged(keys=keys, reader="nibabelreader"),
                 EnsureChannelFirstd(keys=keys),
                 # sampling
                 PreprocessAnisotropic(keys=keys, model_mode=stage, **kwargs),

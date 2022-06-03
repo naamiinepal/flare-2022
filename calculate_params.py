@@ -29,7 +29,7 @@ def get_task_params(args):
     # print(data_dicts)
     dataset = Dataset(
         data=data_dicts,
-        transform=LoadImaged(keys=["image", "label"]),
+        transform=LoadImaged(keys=["image", "label"], reader="nibabelreader"),
     )
 
     calculator = DatasetSummary(dataset, num_workers=4)
