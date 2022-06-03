@@ -7,7 +7,6 @@ import pytorch_lightning as pl
 from monai.data import CacheDataset, DataLoader, Dataset, PersistentDataset
 from monai.transforms import (
     Compose,
-    CropForegroundd,
     EnsureChannelFirstd,
     LoadImaged,
     NormalizeIntensityd,
@@ -19,6 +18,8 @@ from monai.transforms import (
     RandScaleIntensityd,
     ToTensord,
 )
+
+from transforms import PreprocessAnisotropic
 
 
 class DataModule(pl.LightningDataModule):
@@ -37,6 +38,9 @@ class DataModule(pl.LightningDataModule):
         ds_cache_type: Optional[Literal["mem", "disk"]] = None,
         max_workers: int = 4,
         roi_size: Tuple[int, int, int] = (128, 128, 64),
+        spacing: Tuple[float, float, float] = (0.8, 0.8, 2.5),
+        normalize_values: Tuple[float, float] = (96.07, 140.74),
+        clip_values: Tuple[float, float] = (-961.0, 266.0),
         pin_memory: bool = True,
         **kwargs
     ):
@@ -68,6 +72,7 @@ class DataModule(pl.LightningDataModule):
 
                 keys = self._dict_keys
                 train_transforms = self.get_transform(
+                    stage,
                     Rand3DElasticd(
                         keys=keys,
                         sigma_range=(5, 7),
@@ -98,10 +103,18 @@ class DataModule(pl.LightningDataModule):
                         num_samples=self.hparams.crop_num_samples,
                         num_classes=self.hparams.num_labels_with_bg,
                     ),
+                    clip_values=self.hparams.clip_values,
+                    pixdim=self.hparams.spacing,
+                    normalize_values=self.hparams.normalize_values,
                 )
                 self.train_ds = self.get_dataset(train_files, train_transforms)
 
-            val_transforms = self.get_transform()
+            val_transforms = self.get_transform(
+                stage,
+                clip_values=self.hparams.clip_values,
+                pixdim=self.hparams.spacing,
+                normalize_values=self.hparams.normalize_values,
+            )
 
             self.val_ds = self.get_dataset(val_files, val_transforms)
 
@@ -166,14 +179,14 @@ class DataModule(pl.LightningDataModule):
         return image_paths
 
     @staticmethod
-    def get_transform(*random_transforms):
+    def get_transform(stage, *random_transforms, **kwargs):
         keys = DataModule._dict_keys
         return Compose(
             (
                 LoadImaged(keys=keys),
                 EnsureChannelFirstd(keys=keys),
-                CropForegroundd(keys=keys, source_key="image"),
-                NormalizeIntensityd(keys="image"),
+                # sampling
+                PreprocessAnisotropic(keys=keys, model_mode=stage, **kwargs),
                 *random_transforms,
                 ToTensord(keys=keys),
             )
