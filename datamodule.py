@@ -78,25 +78,25 @@ class DataModule(pl.LightningDataModule):
                         prob=0.35,
                         mode=("bilinear", "nearest"),
                     ),
-                    RandGaussianNoised(
-                        keys="image",
-                        prob=0.15,
-                    ),
-                    RandGaussianSharpend(
-                        keys="image",
-                        sigma1_x=(0.5, 1.5),
-                        sigma1_y=(0.5, 1.5),
-                        sigma1_z=(0.5, 1.5),
-                        prob=0.2,
-                    ),
-                    RandScaleIntensityd(keys="image", factors=(0.65, 1.5), prob=0.15),
-                    RandAdjustContrastd(keys="image", gamma=(0.7, 1.5), prob=0.15),
                     RandCropByLabelClassesd(
                         keys=keys,
                         label_key="label",
                         spatial_size=self.hparams.roi_size,
                         num_samples=self.hparams.crop_num_samples,
                         num_classes=self.hparams.num_labels_with_bg,
+                    ),
+                    RandGaussianNoised(
+                        keys="image",
+                        prob=0.15,
+                    ),
+                    RandScaleIntensityd(keys="image", factors=(0.65, 1.5), prob=0.15),
+                    RandAdjustContrastd(keys="image", gamma=(0.7, 1.5), prob=0.15),
+                    RandGaussianSharpend(
+                        keys="image",
+                        sigma1_x=(0.5, 1.5),
+                        sigma1_y=(0.5, 1.5),
+                        sigma1_z=(0.5, 1.5),
+                        prob=0.2,
                     ),
                 )
                 self.train_ds = self.get_dataset(train_files, train_transforms)
