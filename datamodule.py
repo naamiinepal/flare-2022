@@ -17,6 +17,7 @@ from monai.transforms import (
     RandGaussianNoised,
     RandGaussianSharpend,
     RandScaleIntensityd,
+    Spacingd,
     ToTensord,
 )
 
@@ -37,6 +38,7 @@ class DataModule(pl.LightningDataModule):
         ds_cache_type: Optional[Literal["mem", "disk"]] = None,
         max_workers: int = 4,
         roi_size: Tuple[int, int, int] = (128, 128, 64),
+        pixdim: Tuple[float, float, float] = (3, 3, 1),
         pin_memory: bool = True,
         **kwargs
     ):
@@ -78,13 +80,6 @@ class DataModule(pl.LightningDataModule):
                         prob=0.35,
                         mode=("bilinear", "nearest"),
                     ),
-                    RandCropByLabelClassesd(
-                        keys=keys,
-                        label_key="label",
-                        spatial_size=self.hparams.roi_size,
-                        num_samples=self.hparams.crop_num_samples,
-                        num_classes=self.hparams.num_labels_with_bg,
-                    ),
                     RandGaussianNoised(
                         keys="image",
                         prob=0.15,
@@ -97,6 +92,13 @@ class DataModule(pl.LightningDataModule):
                         sigma1_y=(0.5, 1.5),
                         sigma1_z=(0.5, 1.5),
                         prob=0.2,
+                    ),
+                    RandCropByLabelClassesd(
+                        keys=keys,
+                        label_key="label",
+                        spatial_size=self.hparams.roi_size,
+                        num_samples=self.hparams.crop_num_samples,
+                        num_classes=self.hparams.num_labels_with_bg,
                     ),
                 )
                 self.train_ds = self.get_dataset(train_files, train_transforms)
@@ -165,14 +167,16 @@ class DataModule(pl.LightningDataModule):
         image_paths.sort()
         return image_paths
 
-    @staticmethod
-    def get_transform(*random_transforms):
-        keys = DataModule._dict_keys
+    def get_transform(self, *random_transforms):
+        keys = self._dict_keys
         return Compose(
             (
                 LoadImaged(keys=keys),
                 EnsureChannelFirstd(keys=keys),
-                CropForegroundd(keys=keys, source_key="image"),
+                Spacingd(
+                    keys=keys, pixdim=self.hparams.pixdim, mode=("bilinear", "nearest")
+                ),
+                # CropForegroundd(keys=keys, source_key="image"),
                 NormalizeIntensityd(keys="image"),
                 *random_transforms,
                 ToTensord(keys=keys),
