@@ -7,7 +7,6 @@ import pytorch_lightning as pl
 from monai.data import CacheDataset, DataLoader, Dataset, PersistentDataset
 from monai.transforms import (
     Compose,
-    CropForegroundd,
     EnsureChannelFirstd,
     LoadImaged,
     NormalizeIntensityd,
@@ -108,6 +107,8 @@ class DataModule(pl.LightningDataModule):
             self.val_ds = self.get_dataset(val_files, val_transforms)
 
         if stage is None or stage == "predict":
+            import numpy as np
+
             from saver import NiftiSaver
 
             pred_image_paths = glob(os.path.join(self.hparams.predict_dir, "*.nii.gz"))
@@ -118,10 +119,14 @@ class DataModule(pl.LightningDataModule):
             keys = "image"
             pred_transforms = Compose(
                 (
-                    LoadImaged(keys=keys),
-                    EnsureChannelFirstd(keys=keys),
+                    LoadImaged(keys="image"),
+                    EnsureChannelFirstd(keys="image"),
+                    Spacingd(
+                        keys="image",
+                        pixdim=self.hparams.pixdim,
+                    ),
                     NormalizeIntensityd(keys="image"),
-                    ToTensord(keys=keys),
+                    ToTensord(keys="image"),
                 ),
             )
 
@@ -130,6 +135,7 @@ class DataModule(pl.LightningDataModule):
             self.saver = NiftiSaver(
                 self.hparams.output_dir,
                 output_postfix="",
+                output_dtype=np.uint8,
                 separate_folder=False,
                 print_log=False,
             )
@@ -176,7 +182,6 @@ class DataModule(pl.LightningDataModule):
                 Spacingd(
                     keys=keys, pixdim=self.hparams.pixdim, mode=("bilinear", "nearest")
                 ),
-                # CropForegroundd(keys=keys, source_key="image"),
                 NormalizeIntensityd(keys="image"),
                 *random_transforms,
                 ToTensord(keys=keys),
