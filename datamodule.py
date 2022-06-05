@@ -119,7 +119,7 @@ class DataModule(pl.LightningDataModule):
             keys = "image"
             pred_transforms = Compose(
                 (
-                    LoadImaged(keys="image"),
+                    LoadImaged(reader="NibabelReader", keys="image"),
                     EnsureChannelFirstd(keys="image"),
                     Spacingd(
                         keys="image",
@@ -177,7 +177,7 @@ class DataModule(pl.LightningDataModule):
         keys = self._dict_keys
         return Compose(
             (
-                LoadImaged(keys=keys),
+                LoadImaged(reader="NibabelReader", keys=keys),
                 EnsureChannelFirstd(keys=keys),
                 Spacingd(
                     keys=keys, pixdim=self.hparams.pixdim, mode=("bilinear", "nearest")

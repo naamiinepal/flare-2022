@@ -29,7 +29,7 @@ def main(params):
 
     pred_transforms = Compose(
         (
-            LoadImaged(keys="image"),
+            LoadImaged(reader="NibabelReader", keys="image"),
             EnsureChannelFirstd(keys="image"),
             NormalizeIntensityd(keys="image"),
             ToTensord(keys="image"),
