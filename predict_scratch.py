@@ -1,6 +1,7 @@
 import os.path
 from argparse import ArgumentParser
 from glob import glob
+import numpy as np
 
 import torch
 from monai.data import DataLoader, Dataset
@@ -14,14 +15,15 @@ from monai.transforms import (
 )
 
 from saver import NiftiSaver
+import gc
 
 
 def main(params):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = torch.jit.load("abdomen_checkpoint.pt", map_location=device).eval()
+    model = torch.jit.load("flare_supervised_checkpoint.pt", map_location=device).eval()
 
-    pred_image_paths = glob(os.path.join(params.predict_dir, "*.nii.gz"))
+    pred_image_paths = glob(os.path.join(params.predict_dir, "*.nii.gz"))[3:]
 
     pred_dicts = tuple({"image": img} for img in pred_image_paths)
 
@@ -39,11 +41,12 @@ def main(params):
     saver = NiftiSaver(
         params.output_dir,
         output_postfix="",
+        output_dtype=np.uint8,
         separate_folder=False,
-        print_log=False,
+        print_log=True,  # make false for docker
     )
 
-    roi_size = (128, 128, 32)
+    roi_size = (128, 128, 64)
 
     dl = DataLoader(
         pred_ds,
@@ -64,12 +67,15 @@ def main(params):
                 device="cpu",
             )
 
-            batch_meta_data = batch["image_meta_dict"]
+            # Squeezing for a single batch
+            argmax_out: np.ndarray = output.squeeze(0).argmax(dim=0).numpy()
+            meta_data = {k: v[0] for k, v in batch["image_meta_dict"].items()}
+            saver(argmax_out, meta_data)
 
-            for i, out in enumerate(output):
-                argmax_out = out.argmax(dim=0)
-                meta_data = {k: v[i] for k, v in batch_meta_data.items()}
-                saver(argmax_out, meta_data)
+            # Run garbage collector if RAM is OOM
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
