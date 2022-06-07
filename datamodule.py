@@ -1,7 +1,7 @@
 import math
 import os.path
 from glob import glob
-from typing import Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple, Union
 
 import pytorch_lightning as pl
 from monai.data import CacheDataset, DataLoader, Dataset, PersistentDataset
@@ -12,13 +12,16 @@ from monai.transforms import (
     NormalizeIntensityd,
     Rand3DElasticd,
     RandAdjustContrastd,
-    RandCropByLabelClassesd,
     RandGaussianNoised,
     RandGaussianSharpend,
     RandScaleIntensityd,
+    RandSpatialCropSamplesd,
     Spacingd,
     ToTensord,
+    Transform,
 )
+
+from custom_transforms import SimulateLowResolutiond
 
 
 class DataModule(pl.LightningDataModule):
@@ -71,20 +74,18 @@ class DataModule(pl.LightningDataModule):
                 train_transforms = self.get_transform(
                     Rand3DElasticd(
                         keys=keys,
-                        sigma_range=(5, 7),
-                        magnitude_range=(50, 150),
+                        sigma_range=(9, 13),
+                        magnitude_range=(0, 900),
                         padding_mode="zeros",
-                        rotate_range=(math.pi / 6, math.pi / 6, math.pi / 6),
-                        scale_range=((0.7, 1.4), (0.7, 1.4), (0.7, 1.4)),
-                        prob=0.35,
+                        rotate_range=(math.pi / 12, math.pi / 12, math.pi / 12),
+                        scale_range=((0.85, 1.25), (0.85, 1.25), (0.85, 1.25)),
+                        prob=0.6,
                         mode=("bilinear", "nearest"),
                     ),
                     RandGaussianNoised(
                         keys="image",
                         prob=0.15,
                     ),
-                    RandScaleIntensityd(keys="image", factors=(0.65, 1.5), prob=0.15),
-                    RandAdjustContrastd(keys="image", gamma=(0.7, 1.5), prob=0.15),
                     RandGaussianSharpend(
                         keys="image",
                         sigma1_x=(0.5, 1.5),
@@ -92,12 +93,14 @@ class DataModule(pl.LightningDataModule):
                         sigma1_z=(0.5, 1.5),
                         prob=0.2,
                     ),
-                    RandCropByLabelClassesd(
+                    RandScaleIntensityd(keys="image", factors=(0.7, 1.3), prob=0.15),
+                    RandAdjustContrastd(keys="image", gamma=(0.65, 1.5), prob=0.15),
+                    SimulateLowResolutiond(keys="image", zoom_range=0.5, prob=0.25),
+                    RandSpatialCropSamplesd(
                         keys=keys,
-                        label_key="label",
-                        spatial_size=self.hparams.roi_size,
+                        roi_size=self.hparams.roi_size,
                         num_samples=self.hparams.crop_num_samples,
-                        num_classes=self.hparams.num_labels_with_bg,
+                        random_size=False,
                     ),
                 )
                 self.train_ds = self.get_dataset(train_files, train_transforms)
@@ -116,19 +119,7 @@ class DataModule(pl.LightningDataModule):
 
             pred_dicts = tuple({"image": img} for img in pred_image_paths)
 
-            keys = "image"
-            pred_transforms = Compose(
-                (
-                    LoadImaged(reader="NibabelReader", keys="image"),
-                    EnsureChannelFirstd(keys="image"),
-                    Spacingd(
-                        keys="image",
-                        pixdim=self.hparams.pixdim,
-                    ),
-                    NormalizeIntensityd(keys="image"),
-                    ToTensord(keys="image"),
-                ),
-            )
+            pred_transforms = self.get_transform(keys="image")
 
             self.pred_ds = Dataset(pred_dicts, pred_transforms)
 
@@ -173,15 +164,17 @@ class DataModule(pl.LightningDataModule):
         image_paths.sort()
         return image_paths
 
-    def get_transform(self, *random_transforms):
-        keys = self._dict_keys
+    def get_transform(
+        self,
+        *random_transforms: Transform,
+        keys: Union[Tuple[str, str], str] = _dict_keys
+    ):
+        mode = ("bilinear", "nearest") if len(keys) == 2 else "bilinear"
         return Compose(
             (
                 LoadImaged(reader="NibabelReader", keys=keys),
                 EnsureChannelFirstd(keys=keys),
-                Spacingd(
-                    keys=keys, pixdim=self.hparams.pixdim, mode=("bilinear", "nearest")
-                ),
+                Spacingd(keys=keys, pixdim=self.hparams.pixdim, mode=mode),
                 NormalizeIntensityd(keys="image"),
                 *random_transforms,
                 ToTensord(keys=keys),
