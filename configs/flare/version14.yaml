@@ -4,7 +4,7 @@ trainer:
       class_path: pytorch_lightning.loggers.TensorBoardLogger
       init_args:
           save_dir: tb_logs
-          name: unet-l6-s8-256-spacing-res1
+          name: unet-l7-s4-256-spacing-res2
           log_graph: True
           default_hp_metric: False
   callbacks:
@@ -13,7 +13,7 @@ trainer:
         save_top_k: 10
         monitor: ${model.monitor}
         mode: min
-        dirpath: checkpoints/unet-l6-s8-256-spacing-res1
+        dirpath: checkpoints/unet-l7-s4-256-spacing-res2
         save_weights_only: True
         filename: "{epoch:02d}-{val\/loss:.2f}"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
@@ -22,7 +22,7 @@ trainer:
         monitor: ${model.monitor}
         patience: 8
         verbose: True
-  devices: [1]
+  devices: [0]
   max_epochs: 100
   accelerator: "gpu"
   strategy: null
@@ -36,8 +36,9 @@ model:
       out_channels: ${data.num_labels_with_bg}
       channels: [4, 8, 16, 32, 64, 128, 256]
       strides: [2, 2, 2, 2, 2, 2]
-      num_res_units: 1
-  learning_rate: 0.02
+      num_res_units: 2
+      act: memswish
+  learning_rate: 0.03
   sw_batch_size: ${data.crop_num_samples}
   sw_overlap: 0.1
   plateu_patience: 2
@@ -48,7 +49,7 @@ data:
   num_labels_with_bg: 14
   val_ratio: 0.2
   crop_num_samples: 4
-  batch_size: 16
+  batch_size: 8
   ds_cache_type: mem
   max_workers: 4
   roi_size: [128, 128, 64]

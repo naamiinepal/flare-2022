@@ -16,6 +16,9 @@ dm = DataModule(
 
 dm.setup("fit")
 
+first_train = dm.train_ds[0]
+first_val = dm.val_ds[0]
+
 # dsum = DatasetSummary(dm.val_ds, num_workers=dm.num_workers)
 
 # spacing = dsum.get_target_spacing()
