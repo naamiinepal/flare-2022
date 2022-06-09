@@ -5,6 +5,18 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name":"Debug Fitting",
+            "type":"python",
+            "request":"launch",
+            "program":"trainer_cli.py",
+            "args": [
+                "fit",
+                "--config",
+                "configs/flare/version15.yaml"
+            ],
+            "justMyCode":true
+        },
+        {
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",

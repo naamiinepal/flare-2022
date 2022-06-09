@@ -1,8 +1,9 @@
+import gc
 import os.path
 from argparse import ArgumentParser
 from glob import glob
-import numpy as np
 
+# import numpy as np
 import torch
 from monai.data import DataLoader, Dataset
 from monai.inferers import sliding_window_inference
@@ -11,11 +12,12 @@ from monai.transforms import (
     EnsureChannelFirstd,
     LoadImaged,
     NormalizeIntensityd,
+    Orientationd,
+    Spacingd,
     ToTensord,
 )
 
-from saver import NiftiSaver
-import gc
+# from saver import NiftiSaver
 
 
 def main(params):
@@ -31,6 +33,8 @@ def main(params):
         (
             LoadImaged(reader="NibabelReader", keys="image"),
             EnsureChannelFirstd(keys="image"),
+            Spacingd(keys="image", pixdim=(2.5, 2.5, 2.5)),
+            Orientationd(keys="image", axcodes="RAI"),
             NormalizeIntensityd(keys="image"),
             ToTensord(keys="image"),
         )
@@ -38,13 +42,13 @@ def main(params):
 
     pred_ds = Dataset(pred_dicts, pred_transforms)
 
-    saver = NiftiSaver(
-        params.output_dir,
-        output_postfix="",
-        output_dtype=np.uint8,
-        separate_folder=False,
-        print_log=True,  # make false for docker
-    )
+    # saver = NiftiSaver(
+    #     params.output_dir,
+    #     output_postfix="",
+    #     output_dtype=np.uint8,
+    #     separate_folder=False,
+    #     print_log=True,  # make false for docker
+    # )
 
     roi_size = (128, 128, 64)
 
@@ -64,13 +68,22 @@ def main(params):
                 params.sw_batch_size,
                 model,
                 overlap=params.sw_overlap,
-                device="cpu",
+                # device="cpu",
+            )
+
+            channel_dim = 1
+
+            print(
+                "Max",
+                torch.softmax(output, dim=channel_dim)
+                .max(dim=channel_dim)
+                .values.mean(),
             )
 
             # Squeezing for a single batch
-            argmax_out: np.ndarray = output.squeeze(0).argmax(dim=0).numpy()
-            meta_data = {k: v[0] for k, v in batch["image_meta_dict"].items()}
-            saver(argmax_out, meta_data)
+            # argmax_out: np.ndarray = output.squeeze(0).argmax(dim=0).numpy()
+            # meta_data = {k: v[0] for k, v in batch["image_meta_dict"].items()}
+            # saver(argmax_out, meta_data)
 
             # Run garbage collector if RAM is OOM
             gc.collect()

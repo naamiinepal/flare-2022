@@ -1,27 +1,34 @@
 import math
 import os.path
+import random
 from glob import glob
-from typing import Iterable, List, Literal, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple, Union
 
+import numpy as np
 import pytorch_lightning as pl
 from monai.data import CacheDataset, DataLoader, Dataset, PersistentDataset
 from monai.transforms import (
+    CastToTyped,
     Compose,
     EnsureChannelFirstd,
     LoadImaged,
     NormalizeIntensityd,
-    Rand3DElasticd,
+    Orientationd,
+    Rand3DElastic,
     RandAdjustContrastd,
     RandGaussianNoised,
     RandGaussianSmoothd,
     RandScaleIntensityd,
     RandSpatialCropSamplesd,
     Spacingd,
+    SpatialPadd,
     ToTensord,
 )
 from torch.utils.data import ConcatDataset
 
-from custom_transforms import SimulateLowResolutiond
+from custom_transforms import SimulateLowResolution
+
+TupleStr = Union[Tuple[str, str], str]
 
 
 class DataModule(pl.LightningDataModule):
@@ -37,6 +44,7 @@ class DataModule(pl.LightningDataModule):
         output_dir: str = ".",
         val_ratio: float = 0.2,
         do_semi: float = False,
+        semi_mu: Optional[int] = None,
         crop_num_samples: int = 4,
         batch_size: int = 16,
         ds_cache_type: Optional[Literal["mem", "disk"]] = None,
@@ -83,12 +91,19 @@ class DataModule(pl.LightningDataModule):
                     unlabeled_image_paths = glob(
                         os.path.join(self.hparams.semisupervised_dir, "*.nii.gz")
                     )
+                    if isinstance(self.hparams.semi_mu, int):
+                        unlabeled_image_paths = random.sample(
+                            unlabeled_image_paths,
+                            k=len(train_files) * self.hparams.semi_mu,
+                        )
 
                     unlabeled_files = tuple(
                         {"image": img} for img in unlabeled_image_paths
                     )
 
-                    unlabeled_transform = self.get_transform(keys="image")
+                    unlabeled_transform = self.get_transform(
+                        keys="image", do_random=True
+                    )
 
                     unlabeled_ds = self.get_dataset(
                         unlabeled_files, unlabeled_transform
@@ -156,38 +171,36 @@ class DataModule(pl.LightningDataModule):
         return image_paths
 
     def get_transform(
-        self, keys: Union[Tuple[str, str], str] = _dict_keys, do_random: bool = False
+        self,
+        keys: TupleStr = _dict_keys,
+        do_random: bool = False,
     ):
-        mode = ("bilinear", "nearest") if len(keys) == 2 else "bilinear"
-        random_transforms = (
-            self.get_random_transform(keys, mode) if do_random else tuple()
-        )
+        mode = "bilinear"
+        additional_transforms = []
+
+        if len(keys) == 2:
+            mode = (mode, "nearest")
+            additional_transforms.append(CastToTyped(keys="label", dtype=np.uint8))
+
+        if do_random:
+            additional_transforms.extend(self.get_weak_aug(keys, mode))
 
         return Compose(
             (
                 LoadImaged(reader="NibabelReader", keys=keys),
                 EnsureChannelFirstd(keys=keys),
-                Spacingd(keys=keys, pixdim=self.hparams.pixdim, mode=mode),
+                Spacingd(
+                    keys=keys, pixdim=self.hparams.pixdim, mode=mode, dtype=np.float32
+                ),
+                Orientationd(keys, axcodes="RAI"),
                 NormalizeIntensityd(keys="image"),
-                *random_transforms,
+                *additional_transforms,
                 ToTensord(keys=keys),
             )
         )
 
-    def get_random_transform(
-        self, keys: Union[Tuple[str, str], str], mode: Union[Iterable[str, str], str]
-    ):
+    def get_weak_aug(self, keys: TupleStr, mode: TupleStr):
         return (
-            Rand3DElasticd(
-                keys=keys,
-                sigma_range=(9, 13),
-                magnitude_range=(0, 900),
-                padding_mode="border",
-                rotate_range=(math.pi / 12, math.pi / 12, math.pi / 12),
-                scale_range=((0.85, 1.25), (0.85, 1.25), (0.85, 1.25)),
-                prob=0.6,
-                mode=("bilinear", "nearest"),
-            ),
             RandGaussianNoised(
                 keys="image",
                 prob=0.15,
@@ -201,13 +214,29 @@ class DataModule(pl.LightningDataModule):
             ),
             RandScaleIntensityd(keys="image", factors=(0.7, 1.3), prob=0.15),
             RandAdjustContrastd(keys="image", gamma=(0.65, 1.5), prob=0.15),
-            SimulateLowResolutiond(keys="image", zoom_range=0.5, prob=0.25),
             RandSpatialCropSamplesd(
                 keys=keys,
                 roi_size=self.hparams.roi_size,
                 num_samples=self.hparams.crop_num_samples,
                 random_size=False,
             ),
+            SpatialPadd(keys=keys, spatial_size=self.hparams.roi_size),
+        )
+
+    @staticmethod
+    def get_strong_aug():
+        return Compose(
+            (
+                Rand3DElastic(
+                    sigma_range=(9, 13),
+                    magnitude_range=(0, 900),
+                    rotate_range=(math.pi / 12, math.pi / 12, math.pi / 12),
+                    scale_range=((0.85, 1.25), (0.85, 1.25), (0.85, 1.25)),
+                    prob=0.6,
+                    padding_mode="zeros",
+                ),
+                SimulateLowResolution(zoom_range=0.5, prob=0.25),
+            )
         )
 
     def get_dataset(self, *dataset_args):
