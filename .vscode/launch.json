@@ -12,7 +12,7 @@
             "args": [
                 "fit",
                 "--config",
-                "configs/flare/version15.yaml"
+                "configs/flare/version20.yaml"
             ],
             "justMyCode":true
         },

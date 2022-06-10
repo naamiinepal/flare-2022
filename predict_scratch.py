@@ -3,13 +3,14 @@ import os.path
 from argparse import ArgumentParser
 from glob import glob
 
-# import numpy as np
+import numpy as np
 import torch
 from monai.data import DataLoader, Dataset
 from monai.inferers import sliding_window_inference
 from monai.transforms import (
     Compose,
     EnsureChannelFirstd,
+    KeepLargestConnectedComponent,
     LoadImaged,
     NormalizeIntensityd,
     Orientationd,
@@ -17,7 +18,10 @@ from monai.transforms import (
     ToTensord,
 )
 
-# from saver import NiftiSaver
+from saver import NiftiSaver
+
+num_labels_with_bg = 14
+roi_size = (128, 128, 64)
 
 
 def main(params):
@@ -25,7 +29,7 @@ def main(params):
 
     model = torch.jit.load("flare_supervised_checkpoint.pt", map_location=device).eval()
 
-    pred_image_paths = glob(os.path.join(params.predict_dir, "*.nii.gz"))[3:]
+    pred_image_paths = glob(os.path.join(params.predict_dir, "*.nii.gz"))
 
     pred_dicts = tuple({"image": img} for img in pred_image_paths)
 
@@ -33,7 +37,7 @@ def main(params):
         (
             LoadImaged(reader="NibabelReader", keys="image"),
             EnsureChannelFirstd(keys="image"),
-            Spacingd(keys="image", pixdim=(2.5, 2.5, 2.5)),
+            Spacingd(keys="image", pixdim=(2.5, 2.5, 2.5), dtype=np.float32),
             Orientationd(keys="image", axcodes="RAI"),
             NormalizeIntensityd(keys="image"),
             ToTensord(keys="image"),
@@ -42,15 +46,22 @@ def main(params):
 
     pred_ds = Dataset(pred_dicts, pred_transforms)
 
-    # saver = NiftiSaver(
-    #     params.output_dir,
-    #     output_postfix="",
-    #     output_dtype=np.uint8,
-    #     separate_folder=False,
-    #     print_log=True,  # make false for docker
-    # )
+    saver = NiftiSaver(
+        params.output_dir,
+        output_postfix="",
+        mode="nearest",
+        dtype=np.float32,
+        output_dtype=np.uint8,
+        separate_folder=False,
+        print_log=True,  # make false for docker
+    )
 
-    roi_size = (128, 128, 64)
+    keep_connected_component = KeepLargestConnectedComponent(
+        applied_labels=range(1, num_labels_with_bg),
+        is_onehot=False,
+        independent=True,
+        connectivity=1,
+    )
 
     dl = DataLoader(
         pred_ds,
@@ -69,23 +80,29 @@ def main(params):
                 model,
                 overlap=params.sw_overlap,
                 # device="cpu",
+                mode="gaussian",
             )
 
-            channel_dim = 1
+            # channel_dim = 1
 
-            print(
-                "Max",
-                torch.softmax(output, dim=channel_dim)
-                .max(dim=channel_dim)
-                .values.mean(),
-            )
+            # print(
+            #     "Max",
+            #     torch.softmax(output, dim=channel_dim)
+            #     .max(dim=channel_dim)
+            #     .values.mean(),
+            # )
 
             # Squeezing for a single batch
-            # argmax_out: np.ndarray = output.squeeze(0).argmax(dim=0).numpy()
-            # meta_data = {k: v[0] for k, v in batch["image_meta_dict"].items()}
-            # saver(argmax_out, meta_data)
+
+            argmax_out = output.squeeze(0).argmax(dim=0)
+
+            connected_out = keep_connected_component(argmax_out)
+
+            meta_data = {k: v[0] for k, v in batch["image_meta_dict"].items()}
+            saver(connected_out, meta_data)
 
             # Run garbage collector if RAM is OOM
+            # Reduced max GPU usage from 5G to 4G
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()

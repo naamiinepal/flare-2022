@@ -14,7 +14,7 @@ from monai.transforms import (
     LoadImaged,
     NormalizeIntensityd,
     Orientationd,
-    Rand3DElastic,
+    Rand3DElasticd,
     RandAdjustContrastd,
     RandGaussianNoised,
     RandGaussianSmoothd,
@@ -26,7 +26,7 @@ from monai.transforms import (
 )
 from torch.utils.data import ConcatDataset
 
-from custom_transforms import SimulateLowResolution
+from custom_transforms import SimulateLowResolutiond
 
 TupleStr = Union[Tuple[str, str], str]
 
@@ -227,15 +227,17 @@ class DataModule(pl.LightningDataModule):
     def get_strong_aug():
         return Compose(
             (
-                Rand3DElastic(
+                Rand3DElasticd(
+                    keys=DataModule._dict_keys,
                     sigma_range=(9, 13),
                     magnitude_range=(0, 900),
                     rotate_range=(math.pi / 12, math.pi / 12, math.pi / 12),
                     scale_range=((0.85, 1.25), (0.85, 1.25), (0.85, 1.25)),
-                    prob=0.6,
                     padding_mode="zeros",
+                    mode=("bilinear", "nearest"),
+                    prob=0.8,
                 ),
-                SimulateLowResolution(zoom_range=0.5, prob=0.25),
+                SimulateLowResolutiond(keys="image", zoom_range=0.5, prob=0.25),
             )
         )
 
