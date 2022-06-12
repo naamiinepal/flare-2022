@@ -15,12 +15,9 @@ class Segmentor(pl.LightningModule):
 
     val_dice_metric = DiceMetric(include_background=False, reduction="mean_batch")
 
-    _common_criterion_kwargs = {
-        "include_background": False,
-        "to_onehot_y": True,
-    }
-    soft_criterion = DiceLoss(**_common_criterion_kwargs, softmax=True)
-    logit_criterion = DiceLoss(**_common_criterion_kwargs)
+    criterion = DiceLoss(
+        include_background=False, to_onehot_y=True, batch=True, softmax=True
+    )
 
     labels = (
         "liver",
@@ -48,6 +45,7 @@ class Segmentor(pl.LightningModule):
         sw_overlap: float = 0.1,
         plateu_patience: int = 2,
         plateu_factor: float = 0.1,
+        momentum: float = 0.9,
         monitor: str = "val/loss",
         **kwargs,
     ):
@@ -84,7 +82,7 @@ class Segmentor(pl.LightningModule):
 
             sup_loss = 0.0
             if label is not None:
-                sup_loss = self.soft_criterion(output, label)
+                sup_loss = self.criterion(output, label)
 
             channel_dim = 1
 
@@ -128,14 +126,14 @@ class Segmentor(pl.LightningModule):
                 )
 
                 # Measure Dice of strong_output with augmented pseudo_labeled weak one
-                unsup_loss = self.logit_criterion(strong_output, strong_label)
+                unsup_loss = self.criterion(strong_output, strong_label)
 
             self.log("train/unsup_loss", unsup_loss, **progbar_logger_kwargs)
             self.log("train/sup_loss", sup_loss, **progbar_logger_kwargs)
 
             loss = sup_loss + self.hparams.unsup_weight * unsup_loss
         else:
-            loss = self.soft_criterion(output, label)
+            loss = self.criterion(output, label)
 
         self.log("train/loss", loss, **common_logger_kwargs)
 
@@ -158,7 +156,7 @@ class Segmentor(pl.LightningModule):
 
         self.compute_dice_score(output, label)
 
-        loss = self.soft_criterion(output, label)
+        loss = self.criterion(output, label)
 
         self.log("val/loss", loss, batch_size=1, prog_bar=True)
 

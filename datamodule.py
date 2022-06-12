@@ -132,6 +132,8 @@ class DataModule(pl.LightningDataModule):
             self.saver = NiftiSaver(
                 self.hparams.output_dir,
                 output_postfix="",
+                mode="nearest",
+                dtype=np.float32,
                 output_dtype=np.uint8,
                 separate_folder=False,
                 print_log=False,

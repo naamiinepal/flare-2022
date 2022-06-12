@@ -20,14 +20,14 @@ trainer:
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         monitor: ${model.monitor}
-        patience: 9
+        patience: 40
         verbose: True
-  devices: [0]
+  devices: [0] # None can not be returned in multiple GPUs
   max_epochs: 100
   accelerator: "gpu"
-  strategy: null
-  log_every_n_steps: 13
+  log_every_n_steps: 128
   accumulate_grad_batches: 64 # Actual batch size
+  val_check_interval: 0.25
 model:
   model:
     class_path: monai.networks.nets.UNet
@@ -39,7 +39,6 @@ model:
       strides: [2, 2, 2, 2, 2, 2]
       num_res_units: 2
       act: relu
-  checkpoint_path: flare_supervised_unscripted.pt
   learning_rate: 0.03
   pseudo_threshold: 0.9
   unsup_weight: 1
@@ -52,7 +51,7 @@ data:
   supervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50
   semisupervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/Unlabeled
   do_semi: True
-  semi_mu: null
+  semi_mu: 20
   num_labels_with_bg: 14
   val_ratio: 0.2
   crop_num_samples: 4
