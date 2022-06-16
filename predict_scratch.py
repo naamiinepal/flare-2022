@@ -1,4 +1,4 @@
-import gc
+# import gc
 import os.path
 from argparse import ArgumentParser
 from glob import glob
@@ -85,11 +85,33 @@ def main(params):
 
             channel_dim = 1
 
+            sm = torch.softmax(output, dim=channel_dim)
+
             print(
-                "Mean Max",
-                torch.softmax(output, dim=channel_dim)
-                .max(dim=channel_dim)
-                .values.mean(),
+                "Mean Max with Back",
+                sm.max(dim=channel_dim).values.mean(),
+            )
+
+            sm_fore = sm[:, 1:, ...].max(dim=channel_dim).values
+            print(
+                "Mean Max without Back",
+                sm_fore.mean(),
+            )
+
+            print(
+                "Std Max without Back",
+                sm_fore.std(),
+            )
+
+            print(
+                "Max without Back",
+                sm_fore.max(),
+            )
+
+            print(
+                "Median without Back",
+                sm_fore.median(),
+                end="\n\n\n",
             )
 
             # Squeezing for a single batch
@@ -103,9 +125,9 @@ def main(params):
 
             # Run garbage collector if RAM is OOM
             # Reduced max GPU usage from 5G to 4G
-            gc.collect()
-            if params.gpu_index >= 0:
-                torch.cuda.empty_cache()
+            # gc.collect()
+            # if params.gpu_index >= 0:
+            #     torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":

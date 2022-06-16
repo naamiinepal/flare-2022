@@ -2,11 +2,12 @@ from typing import Iterable, Optional
 
 import pytorch_lightning as pl
 import torch
-from monai.inferers import sliding_window_inference
+from monai.inferers import SlidingWindowInferer
 from monai.losses import DiceLoss
 from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete, KeepLargestConnectedComponent
-from torch import nn
+from monai.visualize.img2tensorboard import add_animated_gif
+from torch import Tensor, nn
 
 from datamodule import DataModule
 
@@ -15,9 +16,7 @@ class Segmentor(pl.LightningModule):
 
     val_dice_metric = DiceMetric(include_background=False, reduction="mean_batch")
 
-    criterion = DiceLoss(
-        include_background=False, to_onehot_y=True, batch=True, softmax=True
-    )
+    criterion = DiceLoss(include_background=False, to_onehot_y=True, softmax=True)
 
     labels = (
         "liver",
@@ -38,6 +37,7 @@ class Segmentor(pl.LightningModule):
     def __init__(
         self,
         model: nn.Module,
+        model_weights_path: Optional[str] = None,
         pseudo_threshold: float = 0.9,
         unsup_weight: float = 1,
         learning_rate: float = 0.03,
@@ -52,6 +52,10 @@ class Segmentor(pl.LightningModule):
         super().__init__()
 
         self.save_hyperparameters(ignore="model")
+
+        if model_weights_path is not None:
+            print("Model weights loaded from:", model_weights_path)
+            model.load_state_dict(torch.load(model_weights_path))
 
         self.model = model
 
@@ -86,15 +90,22 @@ class Segmentor(pl.LightningModule):
 
             channel_dim = 1
 
+            # q_hat = torch.argmax(output, dim=channel_dim, keepdim=True)
             q, q_hat = torch.max(
                 torch.softmax(output, dim=channel_dim), dim=channel_dim, keepdim=True
             )
 
             # Mean prediction for each batch
-            q_mean = torch.mean(q.view(q.size(0), -1), dim=channel_dim)
+            q_thres = torch.mean(q.view(q.size(0), -1), dim=channel_dim)
 
+            # sm_fore = torch.amax(
+            #     torch.softmax(output, dim=channel_dim)[:, 1:, ...], dim=channel_dim
+            # )
+            # q_thres = torch.mean(sm_fore.view(sm_fore.size(0), -1), dim=channel_dim)
+
+            # mask = N
             # Mask per batch
-            mask = q_mean >= self.hparams.pseudo_threshold
+            mask = q_thres >= self.hparams.pseudo_threshold
 
             unsup_loss = 0.0
 
@@ -105,28 +116,19 @@ class Segmentor(pl.LightningModule):
                 # Calculate masked q_hat
                 masked_q_hat = q_hat[mask]
 
-                combined_images = tuple(
-                    map(
-                        self.strong_aug,
-                        (
-                            {"image": m_img, "label": m_label}
-                            for m_img, m_label in zip(masked_image, masked_q_hat)
-                        ),
-                    )
-                )
-
                 # Strong augment image #
-                strong_image = torch.stack(
-                    tuple(comb["image"] for comb in combined_images)
-                )
+                strong_image = torch.stack(tuple(map(self.strong_aug, masked_image)))
                 strong_output = self(strong_image)
 
-                strong_label = torch.stack(
-                    tuple(comb["label"] for comb in combined_images)
-                )
-
                 # Measure Dice of strong_output with augmented pseudo_labeled weak one
-                unsup_loss = self.criterion(strong_output, strong_label)
+                unsup_loss = self.criterion(strong_output, masked_q_hat)
+
+            self.log(
+                "train/unsup_count",
+                mask.sum(dtype=torch.float32),
+                on_epoch=True,
+                reduce_fx="sum",
+            )
 
             self.log("train/unsup_loss", unsup_loss, **progbar_logger_kwargs)
             self.log("train/sup_loss", sup_loss, **progbar_logger_kwargs)
@@ -145,14 +147,15 @@ class Segmentor(pl.LightningModule):
         label = batch["label"]
         image = batch["image"]
 
-        output = sliding_window_inference(
-            image,
-            self.roi_size,
-            self.hparams.sw_batch_size,
-            self,
-            overlap=self.hparams.sw_overlap,
-            mode="gaussian",
-        )
+        output = self.sliding_inferer(image, self)
+
+        if batch_idx == 0:
+            self.plot_image(torch.argmax(output, dim=1, keepdim=True), tag="pred")
+
+            # Plot label only once
+            if not self.is_first_plot:
+                self.plot_image(label, tag="label")
+                self.is_first_plot = True
 
         self.compute_dice_score(output, label)
 
@@ -160,8 +163,18 @@ class Segmentor(pl.LightningModule):
 
         self.log("val/loss", loss, batch_size=1, prog_bar=True)
 
+    def plot_image(self, image: Tensor, tag: str):
+        add_animated_gif(
+            self.logger.experiment,
+            f"{tag}_HWD",
+            image[0].cpu().numpy(),
+            max_out=1,
+            frame_dim=-1,
+            scale_factor=self.image_scaler,
+            global_step=self.global_step,
+        )
+
     def validation_epoch_end(self, outputs):
-        # each_score = self.val_dice_metric
         raw_scores = self.val_dice_metric.aggregate()
         self.val_dice_metric.reset()
 
@@ -178,14 +191,7 @@ class Segmentor(pl.LightningModule):
     def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
         image = batch["image"]
 
-        output = sliding_window_inference(
-            image,
-            self.roi_size,
-            self.hparams.sw_batch_size,
-            self,
-            overlap=self.hparams.sw_overlap,
-            device="cpu",
-        )
+        output = self.sliding_inferer(image, self)
 
         batch_meta_data = {
             k: v.cpu() if isinstance(v, torch.Tensor) else v
@@ -200,12 +206,13 @@ class Segmentor(pl.LightningModule):
     def compute_dice_score(
         self, output: Iterable[torch.Tensor], label: Iterable[torch.Tensor]
     ):
-        post_output = self.post_pred(output.squeeze(0))
-        post_label = self.post_label(label.squeeze(0))
+        post_output = self.keep_connected_component(
+            self.post_pred(output.squeeze(0))
+        ).unsqueeze(0)
 
-        modified_output = self.keep_connected_component(post_output)
+        post_label = self.post_label(label.squeeze(0)).unsqueeze(0)
 
-        self.val_dice_metric(modified_output.unsqueeze(0), post_label.unsqueeze(0))
+        self.val_dice_metric(post_output, post_label)
 
     def configure_optimizers(self):
         # optimizer = torch.optim.SGD(
@@ -236,6 +243,15 @@ class Segmentor(pl.LightningModule):
         datamodule: DataModule = self.trainer.datamodule
         self.roi_size = datamodule.hparams.roi_size
         self.dm_hparams = datamodule.hparams
+
+        self.sliding_inferer = SlidingWindowInferer(
+            self.roi_size,
+            self.hparams.sw_batch_size,
+            self.hparams.sw_overlap,
+            mode="gaussian",
+            cache_roi_weight_map=True,
+        )
+
         if stage is None or stage == "predict":
             self.saver = datamodule.saver
         if stage is None or stage == "fit":
@@ -243,7 +259,7 @@ class Segmentor(pl.LightningModule):
             if datamodule.hparams.do_semi:
                 self.strong_aug = datamodule.get_strong_aug()
         if stage is None or stage == "fit" or stage == "validate":
-            num_labels_with_bg = datamodule.hparams.num_labels_with_bg
+            num_labels_with_bg: int = datamodule.hparams.num_labels_with_bg
             self.post_pred = AsDiscrete(argmax=True, to_onehot=num_labels_with_bg)
             self.post_label = AsDiscrete(to_onehot=num_labels_with_bg)
             self.keep_connected_component = KeepLargestConnectedComponent(
@@ -251,6 +267,8 @@ class Segmentor(pl.LightningModule):
                 is_onehot=True,
                 independent=True,
             )
+            self.image_scaler = 255 / (num_labels_with_bg - 1)
+            self.is_first_plot = False
 
     def save_scripted(self, path: str):
         torch.jit.script(self.model).save(path)

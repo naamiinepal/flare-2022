@@ -12,8 +12,11 @@
             "args": [
                 "fit",
                 "--config",
-                "configs/flare/version20.yaml"
+                "configs/flare/version23.yaml"
             ],
+            "env": {
+                "CUDA_LAUNCH_BLOCKING": "1"
+            },
             "justMyCode":true
         },
         {

@@ -230,4 +230,4 @@ submissions
 *.pt
 *logs
 
-!abdomen_checkpoint.pt
+!flare_supervised_checkpoint.pt

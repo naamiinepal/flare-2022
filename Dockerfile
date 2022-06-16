@@ -12,4 +12,4 @@ RUN pip install --no-cache-dir -qr requirements.txt
 COPY predict_scratch.py saver.py predict.sh ./
 
 # Copy checkpoints
-COPY abdomen_checkpoint.pt ./
+COPY flare_supervised_checkpoint.pt ./

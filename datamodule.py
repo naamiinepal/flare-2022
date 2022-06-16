@@ -8,25 +8,25 @@ import numpy as np
 import pytorch_lightning as pl
 from monai.data import CacheDataset, DataLoader, Dataset, PersistentDataset
 from monai.transforms import (
-    CastToTyped,
     Compose,
     EnsureChannelFirstd,
     LoadImaged,
     NormalizeIntensityd,
     Orientationd,
-    Rand3DElasticd,
-    RandAdjustContrastd,
-    RandGaussianNoised,
-    RandGaussianSmoothd,
-    RandScaleIntensityd,
+    RandAdjustContrast,
+    RandGaussianNoise,
+    RandGaussianSmooth,
+    RandRotated,
+    RandScaleIntensity,
     RandSpatialCropSamplesd,
-    Spacingd,
+    RandZoomd,
+    Resized,
     SpatialPadd,
     ToTensord,
 )
 from torch.utils.data import ConcatDataset
 
-from custom_transforms import SimulateLowResolutiond
+from custom_transforms import SimulateLowResolution
 
 TupleStr = Union[Tuple[str, str], str]
 
@@ -179,21 +179,27 @@ class DataModule(pl.LightningDataModule):
     ):
         mode = "bilinear"
         additional_transforms = []
-
-        if len(keys) == 2:
+        zoom_mode = "trilinear"
+        if not isinstance(keys, str):
             mode = (mode, "nearest")
-            additional_transforms.append(CastToTyped(keys="label", dtype=np.uint8))
+            zoom_mode = (zoom_mode, "nearest")
+            # additional_transforms.append(CastToTyped(keys="label", dtype=np.uint8))
 
         if do_random:
-            additional_transforms.extend(self.get_weak_aug(keys, mode))
+            additional_transforms.extend(self.get_weak_aug(keys, mode, zoom_mode))
 
         return Compose(
             (
                 LoadImaged(reader="NibabelReader", keys=keys),
                 EnsureChannelFirstd(keys=keys),
-                Spacingd(
-                    keys=keys, pixdim=self.hparams.pixdim, mode=mode, dtype=np.float32
+                Resized(
+                    keys=keys,
+                    spatial_size=(*self.hparams.roi_size[:-1], -1),
+                    mode=zoom_mode,
                 ),
+                # Spacingd(
+                #     keys=keys, pixdim=self.hparams.pixdim, mode=mode, dtype=np.float32
+                # ),
                 Orientationd(keys, axcodes="RAI"),
                 NormalizeIntensityd(keys="image"),
                 *additional_transforms,
@@ -201,21 +207,34 @@ class DataModule(pl.LightningDataModule):
             )
         )
 
-    def get_weak_aug(self, keys: TupleStr, mode: TupleStr):
+    def get_weak_aug(
+        self, keys: TupleStr, mode: TupleStr, zoom_mode: Optional[TupleStr] = None
+    ):
+        if zoom_mode is None:
+            zoom_mode = mode
+
+        rot_angle = math.pi / 12
+
         return (
-            RandGaussianNoised(
-                keys="image",
-                prob=0.15,
+            RandRotated(
+                keys=keys,
+                range_x=rot_angle,
+                range_y=rot_angle,
+                range_z=rot_angle,
+                dtype=np.float32,
+                padding_mode="zeros",
+                mode=mode,
+                prob=0.9,
             ),
-            RandGaussianSmoothd(
-                keys="image",
-                sigma_x=(0.5, 1.5),
-                sigma_y=(0.5, 1.5),
-                sigma_z=(0.5, 1.5),
-                prob=0.2,
+            RandZoomd(
+                keys=keys,
+                min_zoom=0.8,
+                max_zoom=1.2,
+                mode=zoom_mode,
+                prob=0.9,
+                padding_mode="constant",
+                keep_size=False,  # Last spatial padd will handle the case
             ),
-            RandScaleIntensityd(keys="image", factors=(0.7, 1.3), prob=0.15),
-            RandAdjustContrastd(keys="image", gamma=(0.65, 1.5), prob=0.15),
             RandSpatialCropSamplesd(
                 keys=keys,
                 roi_size=self.hparams.roi_size,
@@ -229,17 +248,16 @@ class DataModule(pl.LightningDataModule):
     def get_strong_aug():
         return Compose(
             (
-                Rand3DElasticd(
-                    keys=DataModule._dict_keys,
-                    sigma_range=(9, 13),
-                    magnitude_range=(0, 900),
-                    rotate_range=(math.pi / 12, math.pi / 12, math.pi / 12),
-                    scale_range=((0.85, 1.25), (0.85, 1.25), (0.85, 1.25)),
-                    padding_mode="zeros",
-                    mode=("bilinear", "nearest"),
-                    prob=0.8,
+                RandGaussianNoise(prob=0.9),
+                RandGaussianSmooth(
+                    # sigma_x=(0.5, 1.5),
+                    # sigma_y=(0.5, 1.5),
+                    # sigma_z=(0.5, 1.5),
+                    prob=0.9,
                 ),
-                SimulateLowResolutiond(keys="image", zoom_range=0.5, prob=0.25),
+                RandScaleIntensity(factors=(0.7, 1.3), prob=0.9),
+                RandAdjustContrast(gamma=(0.65, 1.5), prob=0.9),
+                SimulateLowResolution(zoom_range=0.5, prob=0.9),
             )
         )
 

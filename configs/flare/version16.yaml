@@ -22,7 +22,7 @@ trainer:
         monitor: ${model.monitor}
         patience: 40
         verbose: True
-  devices: [0] # None can not be returned in multiple GPUs
+  devices: [1] # None can not be returned in multiple GPUs
   max_epochs: 100
   accelerator: "gpu"
   log_every_n_steps: 128
@@ -57,6 +57,6 @@ data:
   crop_num_samples: 4
   batch_size: ${data.crop_num_samples}
   ds_cache_type: disk
-  max_workers: 4
+  max_workers: 5
   roi_size: [128, 128, 64]
   pixdim: [2.5, 2.5, 2.5]
