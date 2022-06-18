@@ -1,10 +1,11 @@
-# from monai.data import DatasetSummary
+from monai.data import DatasetSummary
 
 from datamodule import DataModule
 
 dm = DataModule(
     num_labels_with_bg=14,
     supervised_dir="/mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50",
+    predict_dir="/mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50/images",
     val_ratio=0.2,
     max_workers=4,
     crop_num_samples=4,
@@ -14,15 +15,21 @@ dm = DataModule(
     roi_size=(128, 128, 64),
 )
 
-dm.setup("fit")
+dm.setup("predict")
 
 # first_train = dm.train_ds[0]
-first_val = dm.val_ds[0]
+# first_val = dm.val_ds[0]
 
-# dsum = DatasetSummary(dm.val_ds, num_workers=dm.num_workers)
+ds = dm.pred_ds
 
-# spacing = dsum.get_target_spacing()
+assert len(ds), "No data found"
 
-# print(spacing)
+dsum = DatasetSummary(ds, num_workers=dm.num_workers)
+
+print("Predict Dir", dm.hparams.predict_dir)
+
+spacing = dsum.get_target_spacing(anisotropic_threshold=9999999999)
+
+print(spacing)
 
 # (0.7958985, 0.7958985, 2.5)

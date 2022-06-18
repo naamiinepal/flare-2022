@@ -1,9 +1,9 @@
-from typing import Iterable, Optional
+from typing import Iterable, Literal, Optional
 
 import pytorch_lightning as pl
 import torch
 from monai.inferers import SlidingWindowInferer
-from monai.losses import DiceLoss
+from monai.losses import GeneralizedDiceLoss
 from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete, KeepLargestConnectedComponent
 from monai.visualize.img2tensorboard import add_animated_gif
@@ -16,7 +16,12 @@ class Segmentor(pl.LightningModule):
 
     val_dice_metric = DiceMetric(include_background=False, reduction="mean_batch")
 
-    criterion = DiceLoss(include_background=False, to_onehot_y=True, softmax=True)
+    # criterion = DiceCELoss(
+    #     include_background=False, to_onehot_y=True, softmax=True, lambda_ce=0.25
+    # )
+    criterion = GeneralizedDiceLoss(
+        include_background=True, to_onehot_y=True, softmax=True, w_type="simple"
+    )
 
     labels = (
         "liver",
@@ -43,15 +48,18 @@ class Segmentor(pl.LightningModule):
         learning_rate: float = 0.03,
         sw_batch_size: int = 4,
         sw_overlap: float = 0.1,
+        sw_mode: Literal["constant", "gaussian"] = "gaussian",
         plateu_patience: int = 2,
         plateu_factor: float = 0.1,
         momentum: float = 0.9,
         monitor: str = "val/loss",
+        do_post_process: bool = True,
+        connectivity: Optional[int] = None,
         **kwargs,
     ):
         super().__init__()
 
-        self.save_hyperparameters(ignore="model")
+        self.save_hyperparameters(ignore=["model", "model_weights_path"])
 
         if model_weights_path is not None:
             print("Model weights loaded from:", model_weights_path)
@@ -149,7 +157,7 @@ class Segmentor(pl.LightningModule):
 
         output = self.sliding_inferer(image, self)
 
-        if batch_idx == 0:
+        if self.logger is not None and batch_idx == 0:
             self.plot_image(torch.argmax(output, dim=1, keepdim=True), tag="pred")
 
             # Plot label only once
@@ -206,13 +214,13 @@ class Segmentor(pl.LightningModule):
     def compute_dice_score(
         self, output: Iterable[torch.Tensor], label: Iterable[torch.Tensor]
     ):
-        post_output = self.keep_connected_component(
-            self.post_pred(output.squeeze(0))
-        ).unsqueeze(0)
+        post_output = self.post_pred(output.squeeze(0))
+        if self.hparams.do_post_process:
+            post_output = self.keep_connected_component(post_output)
 
         post_label = self.post_label(label.squeeze(0)).unsqueeze(0)
 
-        self.val_dice_metric(post_output, post_label)
+        self.val_dice_metric(post_output.unsqueeze(0), post_label)
 
     def configure_optimizers(self):
         # optimizer = torch.optim.SGD(
@@ -248,8 +256,19 @@ class Segmentor(pl.LightningModule):
             self.roi_size,
             self.hparams.sw_batch_size,
             self.hparams.sw_overlap,
-            mode="gaussian",
+            mode=self.hparams.sw_mode,
             cache_roi_weight_map=True,
+        )
+
+        num_labels_with_bg: int = datamodule.hparams.num_labels_with_bg
+
+        self.post_pred = AsDiscrete(argmax=True, to_onehot=num_labels_with_bg)
+        self.post_label = AsDiscrete(to_onehot=num_labels_with_bg)
+        self.keep_connected_component = KeepLargestConnectedComponent(
+            applied_labels=range(1, num_labels_with_bg),
+            is_onehot=True,
+            independent=True,
+            connectivity=self.hparams.connectivity,
         )
 
         if stage is None or stage == "predict":
@@ -259,14 +278,6 @@ class Segmentor(pl.LightningModule):
             if datamodule.hparams.do_semi:
                 self.strong_aug = datamodule.get_strong_aug()
         if stage is None or stage == "fit" or stage == "validate":
-            num_labels_with_bg: int = datamodule.hparams.num_labels_with_bg
-            self.post_pred = AsDiscrete(argmax=True, to_onehot=num_labels_with_bg)
-            self.post_label = AsDiscrete(to_onehot=num_labels_with_bg)
-            self.keep_connected_component = KeepLargestConnectedComponent(
-                applied_labels=range(1, num_labels_with_bg),
-                is_onehot=True,
-                independent=True,
-            )
             self.image_scaler = 255 / (num_labels_with_bg - 1)
             self.is_first_plot = False
 

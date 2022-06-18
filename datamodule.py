@@ -20,13 +20,12 @@ from monai.transforms import (
     RandScaleIntensity,
     RandSpatialCropSamplesd,
     RandZoomd,
-    Resized,
     SpatialPadd,
     ToTensord,
 )
 from torch.utils.data import ConcatDataset
 
-from custom_transforms import SimulateLowResolution
+from custom_transforms import SimulateLowResolution, CustomResized
 
 TupleStr = Union[Tuple[str, str], str]
 
@@ -37,7 +36,7 @@ class DataModule(pl.LightningDataModule):
 
     def __init__(
         self,
-        num_labels_with_bg: Optional[int] = None,
+        num_labels_with_bg: int,
         supervised_dir: str = ".",
         semisupervised_dir: str = ".",
         predict_dir: str = ".",
@@ -50,7 +49,6 @@ class DataModule(pl.LightningDataModule):
         ds_cache_type: Optional[Literal["mem", "disk"]] = None,
         max_workers: int = 4,
         roi_size: Tuple[int, int, int] = (128, 128, 64),
-        pixdim: Tuple[float, float, float] = (3, 3, 1),
         pin_memory: bool = True,
         **kwargs
     ):
@@ -80,10 +78,6 @@ class DataModule(pl.LightningDataModule):
             )
 
             if stage != "validate":
-                assert (
-                    self.hparams.num_labels_with_bg is not None
-                ), "Number of Labels is needed for training"
-
                 train_transforms = self.get_transform(do_random=True)
                 self.train_ds = self.get_dataset(train_files, train_transforms)
 
@@ -192,14 +186,11 @@ class DataModule(pl.LightningDataModule):
             (
                 LoadImaged(reader="NibabelReader", keys=keys),
                 EnsureChannelFirstd(keys=keys),
-                Resized(
+                CustomResized(
                     keys=keys,
-                    spatial_size=(*self.hparams.roi_size[:-1], -1),
+                    roi_size=self.hparams.roi_size,
                     mode=zoom_mode,
                 ),
-                # Spacingd(
-                #     keys=keys, pixdim=self.hparams.pixdim, mode=mode, dtype=np.float32
-                # ),
                 Orientationd(keys, axcodes="RAI"),
                 NormalizeIntensityd(keys="image"),
                 *additional_transforms,
@@ -229,7 +220,7 @@ class DataModule(pl.LightningDataModule):
             RandZoomd(
                 keys=keys,
                 min_zoom=0.8,
-                max_zoom=1.2,
+                max_zoom=1.3,
                 mode=zoom_mode,
                 prob=0.9,
                 padding_mode="constant",

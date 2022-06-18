@@ -13,9 +13,13 @@ base_model = UNet(
 )
 
 # "checkpoints/unet-l7-s4-256-spacing-res2-weak-aug/epoch=77-val/loss=0.49.ckpt"
-checkpoint_path = "checkpoints/unet-l7-s4-256-resize-res3/epoch=92-val/loss=0.63.ckpt"
+checkpoint_path = (
+    "checkpoints/unet-l7-s4-256-resize-res3-semi/epoch=29-val/loss=0.60-v2.ckpt"
+)
 
-model = Segmentor.load_from_checkpoint(checkpoint_path, model=base_model)
+model = Segmentor.load_from_checkpoint(
+    checkpoint_path, model=base_model, model_weights_path=None
+)
 
 # model.save_scripted("flare_supervised_checkpoint.pt")
 model.save_model("flare_supervised_unscripted.pt")

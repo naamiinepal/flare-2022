@@ -1,11 +1,10 @@
 # import sys
 import os.path
+import numpy as np
+from scipy.stats import mode
 
 # from segmentor import Segmentor
 # from monai.networks.nets import UNet
-import sys
-
-import torch
 from tqdm import tqdm
 
 from datamodule import DataModule
@@ -21,19 +20,22 @@ BASE_DIR = "/mnt/HDD2/flare2022/datasets/FLARE2022"
 
 dm = DataModule(
     supervised_dir=os.path.join(BASE_DIR, "Training/FLARE22_LabeledCase50/"),
-    predict_dir=os.path.join(BASE_DIR, "Validation/"),
+    predict_dir=os.path.join(BASE_DIR, "Training/Unlabeled"),
     val_ratio=0.001,
     num_labels_with_bg=14,
     ds_cache_type=None,
     batch_size=1,
     max_workers=4,
     roi_size=(128, 128, 64),
+    pixdim=(3, 3, 2),
 )
 
-dm.setup("fit")
+print(dm.hparams.predict_dir)
+
+dm.setup("predict")
 
 
-dl = dm.train_dataloader()
+dl = dm.predict_dataloader()
 
 # segmentor = Segmentor(
 #     model=UNet(
@@ -62,12 +64,27 @@ dl = dm.train_dataloader()
 
 # print(min_value, max_value)
 
-min_shape = torch.tensor((sys.maxsize, sys.maxsize, sys.maxsize))
-max_shape = torch.zeros(3, dtype=int)
 
-for batch in tqdm(dl):
-    image_shape = torch.as_tensor(batch["image"].shape)[-3:]
-    min_shape = torch.min(min_shape, image_shape)
-    max_shape = torch.max(max_shape, image_shape)
+def print_stats(image_shapes):
+    shape_array = np.array(image_shapes)
+    print("Len of image_shapes:", len(image_shapes))
+    print("Min shape:", shape_array.min(axis=0))
+    print("Max shape:", shape_array.max(axis=0))
+    print("Mean shape:", shape_array.mean(axis=0))
+    print("Std shape:", shape_array.std(axis=0))
+    print("Median shape:", np.median(shape_array, axis=0))
+    print("Mode shape:", mode(shape_array, axis=0), end="\n\n")
 
-print(min_shape, max_shape)
+
+image_shapes = []
+
+for i, batch in enumerate(tqdm(dl), start=1):
+    image_shape = batch["image"].shape[-3:]
+    image_shapes.append(image_shape)
+
+    if i % 100 == 0:
+        print(f"Stats of first {i} images:")
+        print_stats(image_shapes)
+
+print("Final stats:")
+print_stats(image_shapes)
