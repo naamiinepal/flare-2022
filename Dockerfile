@@ -5,7 +5,7 @@ CMD mkdir -p /workspace/inputs /workspace/outputs
 WORKDIR /workspace
 
 # Install requirements
-COPY requirements.txt ./
+COPY docker_requirements.txt requirements.txt
 RUN pip install --no-cache-dir -qr requirements.txt
 
 # Copy Codes

@@ -4,15 +4,132 @@ from typing import Dict, Hashable, Iterable, Mapping, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn.functional as F
-from monai.config import KeysCollection
+from monai.config import DtypeLike, KeysCollection
 from monai.config.type_definitions import NdarrayOrTensor
 from monai.transforms import (
     InvertibleTransform,
     MapTransform,
+    NormalizeIntensity,
     RandomizableTransform,
     Transform,
 )
 from monai.utils.enums import TraceKeys, TransformBackends
+from scipy.spatial import ConvexHull, Delaunay
+
+
+class NormalizeAndClipIntensityd(MapTransform):
+    """
+    Dictionary-based wrapper of :py:class:`monai.transforms.NormalizeIntensity`.
+    This transform can normalize only non-zero values or entire image, and can also calculate
+    mean and std on each channel separately.
+
+    Args:
+        keys: keys of the corresponding items to be transformed.
+            See also: monai.transforms.MapTransform
+        subtrahend: the amount to subtract by (usually the mean)
+        divisor: the amount to divide by (usually the standard deviation)
+        nonzero: whether only normalize non-zero values.
+        channel_wise: if True, calculate on each channel separately, otherwise, calculate on
+            the entire image directly. default to False.
+        dtype: output data type, if None, same as input image. defaults to float32.
+        allow_missing_keys: don't raise exception if key is missing.
+    """
+
+    backend = NormalizeIntensity.backend
+
+    def __init__(
+        self,
+        keys: KeysCollection,
+        clip_range: Tuple[float, float] = (-2, 2),
+        subtrahend: Optional[NdarrayOrTensor] = None,
+        divisor: Optional[NdarrayOrTensor] = None,
+        nonzero: bool = False,
+        channel_wise: bool = False,
+        dtype: DtypeLike = np.float32,
+        allow_missing_keys: bool = False,
+    ) -> None:
+        super().__init__(keys, allow_missing_keys)
+        self.normalizer = NormalizeIntensity(
+            subtrahend, divisor, nonzero, channel_wise, dtype
+        )
+        self.clip_range = clip_range
+
+    def __call__(
+        self, data: Mapping[Hashable, NdarrayOrTensor]
+    ) -> Dict[Hashable, NdarrayOrTensor]:
+        d = dict(data)
+        for key in self.key_iterator(d):
+            norm = self.normalizer(d[key])
+            d[key] = norm.clip(*self.clip_range)
+        return d
+
+
+class Binarized(MapTransform):
+
+    backend = [TransformBackends.NUMPY, TransformBackends.TORCH]
+
+    def __init__(
+        self,
+        keys: KeysCollection,
+        allow_missing_keys: bool = False,
+    ):
+        super().__init__(keys, allow_missing_keys)
+
+    def __call__(
+        self, data: Mapping[Hashable, NdarrayOrTensor]
+    ) -> Dict[Hashable, NdarrayOrTensor]:
+        d = dict(data)
+        for key in self.key_iterator(d):
+            lab = d[key]
+            d[key] = lab.astype(bool) if isinstance(lab, np.ndarray) else lab.bool()
+        return d
+
+
+class BinaryConvexHull(MapTransform):
+
+    backend = [TransformBackends.NUMPY]
+
+    def __init__(
+        self,
+        keys: KeysCollection,
+        retain_original: bool = False,
+        allow_missing_keys: bool = False,
+    ):
+        super().__init__(keys, allow_missing_keys)
+
+        self.retain_original = retain_original
+
+    def __call__(
+        self, data: Mapping[Hashable, NdarrayOrTensor]
+    ) -> Dict[Hashable, NdarrayOrTensor]:
+        d = dict(data)
+        for key in self.key_iterator(d):
+            # Remove the channel dimension
+            img = d[key].squeeze(0)
+
+            if isinstance(img, torch.Tensor):
+                img = img.cpu().numpy()
+
+            # Change to foreground and background only
+            # Changing the data type creates a new copy
+            # so no need to copy again
+            bool_img = img.astype(bool)
+
+            trans_pos_indices = np.vstack(np.where(bool_img)).T
+            hull = ConvexHull(trans_pos_indices)
+
+            triang = Delaunay(trans_pos_indices[hull.vertices])
+
+            neg_indices = np.where(~bool_img)
+
+            simp = triang.find_simplex(np.vstack(neg_indices).T) >= 0
+
+            bool_img[neg_indices] = simp
+
+            hull_key = f"{key}_hull" if self.retain_original else key
+
+            d[hull_key] = np.expand_dims(bool_img, 0)
+        return d
 
 
 class CustomResize(Transform):
@@ -37,13 +154,22 @@ class CustomResize(Transform):
 
     backend = [TransformBackends.TORCH]
 
-    def __init__(self, roi_size: Tuple[int, int, int], mode: str = "trilinear") -> None:
+    def __init__(
+        self,
+        roi_size: Tuple[int, int, int],
+        mode: str = "trilinear",
+        image_only: bool = False,
+    ) -> None:
         self.roi_size = roi_size
         self.mode = mode
+        self.image_only = image_only
 
     def __call__(
-        self, img: NdarrayOrTensor, mode: Optional[str] = None
-    ) -> NdarrayOrTensor:
+        self,
+        img: NdarrayOrTensor,
+        original_affine: Optional[np.ndarray] = None,
+        mode: Optional[str] = None,
+    ) -> Union[NdarrayOrTensor, Tuple[NdarrayOrTensor, np.ndarray]]:
         """
         Args:
             img: channel first array, must have shape: (num_channels, H[, W, ..., ]).
@@ -51,19 +177,16 @@ class CustomResize(Transform):
                 ``"bilinear"``, ``"bicubic"``, ``"trilinear"``, ``"area"``}
                 The interpolation mode. Defaults to ``self.mode``.
                 See also: https://pytorch.org/docs/stable/generated/torch.nn.functional.interpolate.html
-        Raises:
-            ValueError: When ``self.spatial_size`` length is less than ``img`` spatial dimensions.
-
         """
         img_t = torch.as_tensor(img)
         scale_factor = self.roi_size[0] / img_t.size(1)
+        img_shape = np.array(img_t.shape[1:])
         out_size = np.maximum(
-            np.array(img_t.shape[1:]) * scale_factor,
+            img_shape * scale_factor,
             self.roi_size,
             casting="unsafe",
             dtype=int,
         )
-
         zoomed: torch.Tensor = F.interpolate(
             input=img_t.unsqueeze(0),
             size=tuple(out_size),
@@ -72,7 +195,18 @@ class CustomResize(Transform):
 
         # Retain original data type
         out = zoomed.numpy() if isinstance(img, np.ndarray) else zoomed
-        return out
+        if self.image_only:
+            return out
+
+        affine_scaler = img_shape / out_size
+
+        new_affine = (
+            np.eye(img_t.ndim) if original_affine is None else np.copy(original_affine)
+        )
+
+        new_affine[: len(img_shape), : len(img_shape)] *= affine_scaler
+
+        return out, new_affine
 
 
 class CustomResized(MapTransform, InvertibleTransform):
@@ -99,6 +233,7 @@ class CustomResized(MapTransform, InvertibleTransform):
         roi_size: Tuple[int, int, int],
         mode: Union[str, Iterable[str]] = "trilinear",
         allow_missing_keys: bool = False,
+        meta_key_postfix: str = "meta_dict",
         **kwargs,
     ) -> None:
         super().__init__(keys, allow_missing_keys)
@@ -106,22 +241,28 @@ class CustomResized(MapTransform, InvertibleTransform):
         self.mode = (mode,) * len(self.keys) if isinstance(mode, str) else mode
 
         self.resizer = CustomResize(roi_size=roi_size, **kwargs)
+        self.meta_key_postfix = meta_key_postfix
 
     def __call__(
         self, data: Mapping[Hashable, NdarrayOrTensor]
     ) -> Dict[Hashable, NdarrayOrTensor]:
         d = dict(data)
         for key, mode in self.key_iterator(d, self.mode):
+            meta_dict = d[f"{key}_{self.meta_key_postfix}"]
+            original_affine = meta_dict["affine"]
+
+            d[key], meta_dict["affine"] = self.resizer(
+                d[key],
+                original_affine=original_affine,
+                mode=mode,
+            )
             self.push_transform(
                 d,
                 key,
                 extra_info={
                     "mode": mode,
+                    "original_affine": original_affine,
                 },
-            )
-            d[key] = self.resizer(
-                d[key],
-                mode=mode,
             )
         return d
 
@@ -133,13 +274,20 @@ class CustomResized(MapTransform, InvertibleTransform):
             transform = self.get_most_recent_transform(d, key)
             # Create inverse transform
             orig_size = transform[TraceKeys.ORIG_SIZE]
-            mode = transform[TraceKeys.EXTRA_INFO]["mode"]
+            extra_info = transform[TraceKeys.EXTRA_INFO]
+            mode = extra_info["mode"]
             # Apply inverse
             d[key] = F.interpolate(
                 input=d[key].unsqueeze(0),
                 size=orig_size,
                 mode=mode,
             ).squeeze(0)
+
+            # Restore original affine
+            d[f"{key}_{self.meta_key_postfix}"]["spacing"] = extra_info[
+                "original_affine"
+            ]
+
             # Remove the applied transform
             self.pop_transform(d, key)
         return d

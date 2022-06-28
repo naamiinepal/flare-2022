@@ -7,7 +7,7 @@ from scipy.stats import mode
 # from monai.networks.nets import UNet
 from tqdm import tqdm
 
-from datamodule import DataModule
+from datamodules.c2f_datamodule import C2FDataModule
 
 #
 # import torch
@@ -18,24 +18,24 @@ from datamodule import DataModule
 
 BASE_DIR = "/mnt/HDD2/flare2022/datasets/FLARE2022"
 
-dm = DataModule(
+dm = C2FDataModule(
     supervised_dir=os.path.join(BASE_DIR, "Training/FLARE22_LabeledCase50/"),
-    predict_dir=os.path.join(BASE_DIR, "Training/Unlabeled"),
+    predict_dir=os.path.join(BASE_DIR, "Training/FLARE22_LabeledCase50/images"),
     val_ratio=0.001,
     num_labels_with_bg=14,
     ds_cache_type=None,
     batch_size=1,
     max_workers=4,
-    roi_size=(128, 128, 64),
-    pixdim=(3, 3, 2),
+    # roi_size=(128, 128, 64),
+    # pixdim=(3, 3, 2),
 )
 
-print(dm.hparams.predict_dir)
+print(dm.hparams.supervised_dir)
 
-dm.setup("predict")
+dm.setup("fit")
 
 
-dl = dm.predict_dataloader()
+dl = dm.train_dataloader()
 
 # segmentor = Segmentor(
 #     model=UNet(

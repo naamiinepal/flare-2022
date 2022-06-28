@@ -1,4 +1,5 @@
-torch
+pytorch_lightning
 monai
-numpy
 nibabel
+numpy
+torch

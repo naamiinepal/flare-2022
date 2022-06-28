@@ -1,6 +1,6 @@
 from monai.data import DatasetSummary
 
-from datamodule import DataModule
+from datamodules.datamodule import DataModule
 
 dm = DataModule(
     num_labels_with_bg=14,

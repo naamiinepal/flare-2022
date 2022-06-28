@@ -5,41 +5,24 @@ import torch
 from monai.inferers import SlidingWindowInferer
 from monai.losses import DiceCELoss
 from monai.metrics import DiceMetric
-from monai.transforms import AsDiscrete, KeepLargestConnectedComponent
+from monai.transforms import KeepLargestConnectedComponent
 from monai.visualize.img2tensorboard import add_animated_gif
-from torch import Tensor, nn
+from torch import nn
 
 from datamodules.datamodule import DataModule
 
 
-class Segmentor(pl.LightningModule):
+class CoarseModel(pl.LightningModule):
 
-    val_dice_metric = DiceMetric(include_background=False, reduction="mean_batch")
+    val_dice_metric = DiceMetric()
 
-    criterion = DiceCELoss(
-        include_background=False, to_onehot_y=True, softmax=True, lambda_ce=0.25
-    )
-
-    labels = (
-        "liver",
-        "right_kidney",
-        "spleen",
-        "pancreas",
-        "aorta",
-        "ivc",
-        "rag",
-        "lag",
-        "gallbladder",
-        "esophagus",
-        "stomach",
-        "duodenum",
-        "left_kidney",
-    )
+    criterion = DiceCELoss(sigmoid=True, lambda_ce=0.25)
 
     def __init__(
         self,
         model: nn.Module,
         model_weights_path: Optional[str] = None,
+        output_threshold: float = 0.5,
         pseudo_threshold: float = 0.9,
         unsup_weight: float = 1,
         learning_rate: float = 0.03,
@@ -48,7 +31,6 @@ class Segmentor(pl.LightningModule):
         sw_mode: Literal["constant", "gaussian"] = "gaussian",
         plateu_patience: int = 2,
         plateu_factor: float = 0.1,
-        momentum: float = 0.9,
         monitor: str = "val/loss",
         do_post_process: bool = True,
         connectivity: Optional[int] = None,
@@ -93,22 +75,14 @@ class Segmentor(pl.LightningModule):
             if label is not None:
                 sup_loss = self.criterion(output, label)
 
-            channel_dim = 1
-
-            # q_hat = torch.argmax(output, dim=channel_dim, keepdim=True)
-            q, q_hat = torch.max(
-                torch.softmax(output, dim=channel_dim), dim=channel_dim, keepdim=True
-            )
+            # Need to calculate distance from the mean for binary output
+            abs_mean_deviation = torch.abs(torch.sigmoid(output) - 0.5)
 
             # Mean prediction for each batch
-            q_thres = torch.mean(q.view(q.size(0), -1), dim=channel_dim)
+            q_thres = torch.mean(
+                abs_mean_deviation.view(abs_mean_deviation.size(0), -1), dim=1
+            )
 
-            # sm_fore = torch.amax(
-            #     torch.softmax(output, dim=channel_dim)[:, 1:, ...], dim=channel_dim
-            # )
-            # q_thres = torch.mean(sm_fore.view(sm_fore.size(0), -1), dim=channel_dim)
-
-            # mask = N
             # Mask per batch
             mask = q_thres >= self.hparams.pseudo_threshold
 
@@ -119,7 +93,7 @@ class Segmentor(pl.LightningModule):
                 masked_image = image[mask]
 
                 # Calculate masked q_hat
-                masked_q_hat = q_hat[mask]
+                masked_q_hat = self.discretize_output(output[mask])
 
                 # Strong augment image #
                 strong_image = torch.stack(tuple(map(self.strong_aug, masked_image)))
@@ -155,7 +129,7 @@ class Segmentor(pl.LightningModule):
         output = self.sliding_inferer(image, self)
 
         if self.logger is not None and batch_idx == 0:
-            self.plot_image(torch.argmax(output, dim=1, keepdim=True), tag="pred")
+            self.plot_image(self.discretize_output(output), tag="pred")
 
             # Plot label only once
             if not self.is_first_plot:
@@ -168,30 +142,22 @@ class Segmentor(pl.LightningModule):
 
         self.log("val/loss", loss, batch_size=1, prog_bar=True)
 
-    def plot_image(self, image: Tensor, tag: str):
+    def plot_image(self, image: torch.Tensor, tag: str):
         add_animated_gif(
             self.logger.experiment,
             f"{tag}_HWD",
             image[0].cpu().numpy(),
             max_out=1,
             frame_dim=-1,
-            scale_factor=self.image_scaler,
+            scale_factor=255,
             global_step=self.global_step,
         )
 
     def validation_epoch_end(self, outputs):
-        raw_scores = self.val_dice_metric.aggregate()
+        dice_score = self.val_dice_metric.aggregate()
         self.val_dice_metric.reset()
 
-        self.log_dict(
-            {
-                f"val/dice_{label}": score
-                for label, score in zip(self.labels, raw_scores)
-            }
-        )
-
-        mean_dice = torch.mean(raw_scores)
-        self.log("val/dice_score", mean_dice, prog_bar=True)
+        self.log("val/dice_score", dice_score, prog_bar=True)
 
     def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
         image = batch["image"]
@@ -204,33 +170,25 @@ class Segmentor(pl.LightningModule):
         }
 
         for i, out in enumerate(output):
-            argmax_out = out.argmax(dim=0)
+            pred_out = self.descretize_output(out)
             meta_data = {k: v[i] for k, v in batch_meta_data.items()}
-            self.saver(argmax_out, meta_data)
+            self.saver(pred_out, meta_data)
 
     def compute_dice_score(
         self, output: Iterable[torch.Tensor], label: Iterable[torch.Tensor]
     ):
-        post_output = self.post_pred(output.squeeze(0))
+        post_output = self.discretize_output(output)
         if self.hparams.do_post_process:
-            post_output = self.keep_connected_component(post_output)
+            post_output = self.keep_connected_component(
+                post_output.squeeze(0)
+            ).unsqueeze(0)
 
-        post_label = self.post_label(label.squeeze(0)).unsqueeze(0)
+        self.val_dice_metric(post_output, label)
 
-        self.val_dice_metric(post_output.unsqueeze(0), post_label)
+    def discretize_output(self, output: torch.Tensor) -> torch.Tensor:
+        return output >= self.hparams.output_threshold
 
     def configure_optimizers(self):
-        # optimizer = torch.optim.SGD(
-        #     self.parameters(),
-        #     lr=self.hparams.learning_rate,
-        #     momentum=self.hparams.momentum,
-        #     nesterov=True,
-        # )
-
-        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        #     optimizer, T_max=self.trainer.max_epochs
-        # )
-
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
 
         scheduler = {
@@ -257,14 +215,11 @@ class Segmentor(pl.LightningModule):
             cache_roi_weight_map=True,
         )
 
-        num_labels_with_bg: int = datamodule.hparams.num_labels_with_bg
-
-        self.post_pred = AsDiscrete(argmax=True, to_onehot=num_labels_with_bg)
-        self.post_label = AsDiscrete(to_onehot=num_labels_with_bg)
+        # onehot and independent can be anything, but optimized for implementation
         self.keep_connected_component = KeepLargestConnectedComponent(
-            applied_labels=range(1, num_labels_with_bg),
+            applied_labels=1,
             is_onehot=True,
-            independent=True,
+            independent=False,
             connectivity=self.hparams.connectivity,
         )
 
@@ -275,7 +230,6 @@ class Segmentor(pl.LightningModule):
             if datamodule.hparams.do_semi:
                 self.strong_aug = datamodule.get_strong_aug()
         if stage is None or stage == "fit" or stage == "validate":
-            self.image_scaler = 255 / (num_labels_with_bg - 1)
             self.is_first_plot = False
 
     def save_scripted(self, path: str):

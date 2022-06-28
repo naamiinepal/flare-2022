@@ -2,7 +2,7 @@ seed_everything: 42
 trainer:
   logger: False
   max_epochs: 1
-  accelerator: "gpu"
+  accelerator: "cpu"
 model:
   model:
     class_path: monai.networks.nets.UNet
@@ -15,16 +15,15 @@ model:
       num_res_units: 3
       act: relu
   model_weights_path: flare_supervised_unscripted.pt
-  sw_batch_size: 4
+  sw_batch_size: 1
   sw_overlap: 0.25
   sw_mode: gaussian
-  do_post_process: True
+  do_post_process: False
   connectivity: 1
 data:
   supervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50
   num_labels_with_bg: 14
   val_ratio: 0.2
   ds_cache_type: null
-  max_workers: 4
+  max_workers: 1
   roi_size: [128, 128, 64]
-  pixdim: [2.5, 2.5, 2.5]

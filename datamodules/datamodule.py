@@ -1,6 +1,5 @@
 import math
-import os.path
-import random
+import os
 from glob import glob
 from typing import List, Literal, Optional, Tuple, Union
 
@@ -25,7 +24,7 @@ from monai.transforms import (
 )
 from torch.utils.data import ConcatDataset
 
-from custom_transforms import SimulateLowResolution, CustomResized
+from custom_transforms import CustomResized, SimulateLowResolution
 
 TupleStr = Union[Tuple[str, str], str]
 
@@ -86,10 +85,13 @@ class DataModule(pl.LightningDataModule):
                         os.path.join(self.hparams.semisupervised_dir, "*.nii.gz")
                     )
                     if isinstance(self.hparams.semi_mu, int):
-                        unlabeled_image_paths = random.sample(
-                            unlabeled_image_paths,
-                            k=len(train_files) * self.hparams.semi_mu,
-                        )
+                        # Sort by file size
+                        unlabeled_image_paths.sort(key=lambda img: os.stat(img).st_size)
+
+                        # Take only those images with smallest sizes
+                        unlabeled_image_paths = unlabeled_image_paths[
+                            : len(train_files) * self.hparams.semi_mu
+                        ]
 
                     unlabeled_files = tuple(
                         {"image": img} for img in unlabeled_image_paths
@@ -110,8 +112,6 @@ class DataModule(pl.LightningDataModule):
             self.val_ds = self.get_dataset(val_files, val_transforms)
 
         if stage is None or stage == "predict":
-            import numpy as np
-
             from saver import NiftiSaver
 
             pred_image_paths = glob(os.path.join(self.hparams.predict_dir, "*.nii.gz"))
@@ -186,12 +186,12 @@ class DataModule(pl.LightningDataModule):
             (
                 LoadImaged(reader="NibabelReader", keys=keys),
                 EnsureChannelFirstd(keys=keys),
+                Orientationd(keys, axcodes="RAI"),
                 CustomResized(
                     keys=keys,
                     roi_size=self.hparams.roi_size,
                     mode=zoom_mode,
                 ),
-                Orientationd(keys, axcodes="RAI"),
                 NormalizeIntensityd(keys="image"),
                 *additional_transforms,
                 ToTensord(keys=keys),

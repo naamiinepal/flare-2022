@@ -5,14 +5,14 @@ import torch
 from monai.inferers import SlidingWindowInferer
 from monai.losses import DiceCELoss
 from monai.metrics import DiceMetric
-from monai.transforms import AsDiscrete, KeepLargestConnectedComponent
+from monai.transforms import AsDiscrete, KeepLargestConnectedComponent, CropForeground
 from monai.visualize.img2tensorboard import add_animated_gif
 from torch import Tensor, nn
 
 from datamodules.datamodule import DataModule
 
 
-class Segmentor(pl.LightningModule):
+class C2FSegmentor(pl.LightningModule):
 
     val_dice_metric = DiceMetric(include_background=False, reduction="mean_batch")
 
@@ -38,8 +38,8 @@ class Segmentor(pl.LightningModule):
 
     def __init__(
         self,
-        model: nn.Module,
-        model_weights_path: Optional[str] = None,
+        coarse_model: nn.Module,
+        fine_model: nn.Module,
         pseudo_threshold: float = 0.9,
         unsup_weight: float = 1,
         learning_rate: float = 0.03,
@@ -51,18 +51,41 @@ class Segmentor(pl.LightningModule):
         momentum: float = 0.9,
         monitor: str = "val/loss",
         do_post_process: bool = True,
+        is_coarse: bool = True,
         connectivity: Optional[int] = None,
+        coarse_model_weights_path: Optional[str] = None,
+        fine_model_weights_path: Optional[str] = None,
         **kwargs,
     ):
         super().__init__()
 
-        self.save_hyperparameters(ignore=["model", "model_weights_path"])
+        self.save_hyperparameters(ignore=["coarse_model", "fine_model"])
 
-        if model_weights_path is not None:
-            print("Model weights loaded from:", model_weights_path)
-            model.load_state_dict(torch.load(model_weights_path))
+        # if model_weights_path is not None:
+        #     print("Model weights loaded from:", model_weights_path)
+        #     model.load_state_dict(torch.load(model_weights_path))
 
-        self.model = model
+        if self.hparams.coarse_model_weights_path is not None:
+            coarse_model.load_state_dict(
+                torch.load(self.hparams.coarse_model_weights_path)
+            )
+            print(
+                "Coarse model weights loaded from:",
+                self.hparams.coarse_model_weights_path,
+            )
+
+        if self.hparams.fine_model_weights_path is not None:
+            fine_model.load_state_dict(torch.load(self.hparams.fine_model_weights_path))
+            print(
+                "Fine model weights loaded from:", self.hparams.fine_model_weights_path
+            )
+        # Load coarse or fine model
+        self.coarse_model = coarse_model
+        self.fine_model = fine_model
+        if self.hparams.is_coarse:
+            self.model = self.coarse_model
+        else:
+            self.model = self.fine_model
 
     def forward(self, image) -> torch.Tensor:
         return self.model(image)
@@ -155,11 +178,16 @@ class Segmentor(pl.LightningModule):
         output = self.sliding_inferer(image, self)
 
         if self.logger is not None and batch_idx == 0:
-            self.plot_image(torch.argmax(output, dim=1, keepdim=True), tag="pred")
+            pred_output_mask = torch.argmax(output, dim=1, keepdim=True)
+            self.plot_image(pred_output_mask, tag="pred")
+            if self.hparams.is_coarse:
+                self.plot_image(self.crop_foreground(pred_output_mask), tag="pred_bbox")
 
             # Plot label only once
             if not self.is_first_plot:
                 self.plot_image(label, tag="label")
+                if self.hparams.is_coarse:
+                    self.plot_image(self.crop_foreground(label), tag="label_bbox")
                 self.is_first_plot = True
 
         self.compute_dice_score(output, label)
@@ -246,7 +274,11 @@ class Segmentor(pl.LightningModule):
 
     def setup(self, stage: Optional[str] = None):
         datamodule: DataModule = self.trainer.datamodule
-        self.roi_size = datamodule.hparams.roi_size
+        self.roi_size = (
+            datamodule.hparams.coarse_roi_size
+            if self.hparams.is_coarse
+            else datamodule.hparams.fine_roi_size
+        )
         self.dm_hparams = datamodule.hparams
 
         self.sliding_inferer = SlidingWindowInferer(
@@ -267,9 +299,11 @@ class Segmentor(pl.LightningModule):
             independent=True,
             connectivity=self.hparams.connectivity,
         )
+        self.crop_foreground = CropForeground()
 
         if stage is None or stage == "predict":
             self.saver = datamodule.saver
+            # TODO: Coarse Model --> Fine Model
         if stage is None or stage == "fit":
             self.example_input_array = torch.empty(1, 1, *self.roi_size)
             if datamodule.hparams.do_semi:

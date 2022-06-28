@@ -3,8 +3,8 @@ from argparse import ArgumentParser
 from monai.networks.nets import UNet
 from pytorch_lightning import Trainer
 
-from datamodules.datamodule import DataModule
-from segmentor import Segmentor
+from datamodules.c2f_datamodule import C2FDataModule
+from models.segmentor import Segmentor
 
 
 def main(params):
@@ -12,13 +12,12 @@ def main(params):
         spatial_dims=3,
         in_channels=1,
         out_channels=14,
-        channels=(8, 16, 32, 64, 128, 256),
-        strides=(2, 2, 2, 2, 2),
+        channels=(8, 16, 32, 64, 128),
+        strides=(2, 2, 2, 2),
+        act="relu",
     )
 
-    checkpoint_path = (
-        "checkpoints/unet-l6-s8-256-newloss-dataaug-epoch=51-val/loss=0.49.ckpt"
-    )
+    checkpoint_path = "checkpoints/c2f-coarse-unet/epoch=85-val/loss=0.45.ckpt"
 
     print("Using checkpoint:", checkpoint_path)
 
@@ -26,18 +25,19 @@ def main(params):
         checkpoint_path, model=base_model, sw_batch_size=16, sw_overlap=0.25
     )
 
-    dm = DataModule(
+    dm = C2FDataModule(
         num_labels_with_bg=14,
         supervised_dir="/mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50",
         val_ratio=0.2,
         predict_dir=params.predict_dir,
         output_dir=params.output_dir,
-        roi_size=(256, 256, 64),
+        roi_size=(128, 128, 64),
         max_workers=4,
-        batch_size=8,
+        batch_size=2,
+        is_coarse=True,
     )
 
-    trainer = Trainer(logger=False, accelerator="gpu", gpus=[params.gpu], max_epochs=-1)
+    trainer = Trainer(logger=False, accelerator="cpu", max_epochs=-1)
 
     trainer.validate(model, datamodule=dm)
 
