@@ -3,7 +3,7 @@ from argparse import ArgumentParser
 from monai.networks.nets import UNet
 from pytorch_lightning import Trainer
 
-from datamodules.datamodule import DataModule
+from datamodules.single_step_datamodule import SingleStepDataModule
 from segmentor import Segmentor
 
 
@@ -26,7 +26,7 @@ def main(params):
         checkpoint_path, model=base_model, sw_batch_size=16, sw_overlap=0.25
     )
 
-    dm = DataModule(
+    dm = SingleStepDataModule(
         num_labels_with_bg=14,
         supervised_dir="/mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50",
         val_ratio=0.2,

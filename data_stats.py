@@ -1,8 +1,8 @@
 from monai.data import DatasetSummary
 
-from datamodules.datamodule import DataModule
+from datamodules.single_step_datamodule import SingleStepDataModule
 
-dm = DataModule(
+dm = SingleStepDataModule(
     num_labels_with_bg=14,
     supervised_dir="/mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50",
     predict_dir="/mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50/images",

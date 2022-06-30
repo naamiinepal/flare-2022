@@ -1,31 +1,16 @@
 from typing import Optional
 
 import torch
-from monai.losses import DiceCELoss
-from monai.metrics import DiceMetric
-from monai.transforms import KeepLargestConnectedComponent
+from monai.transforms import AsDiscrete, KeepLargestConnectedComponent
 
 from models.basemodel import SingleBaseModel
 
 
-class CoarseModel(SingleBaseModel):
+class SingleStepModel(SingleBaseModel):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
-    val_dice_metric = DiceMetric()
-
-    criterion = DiceCELoss(sigmoid=True, lambda_ce=0.25)
-
-    def __init__(
-        self, output_threshold: float = 0.5, pseudo_threshold: float = 0.4, **kwargs
-    ):
-        """
-        Psuedo_threshold is redefined here to change the defaults
-        The pseudo_threshold is 0.5 less than the one used in other models
-        Because this model is binary
-        """
-        super.__init(pseudo_threshold=pseudo_threshold, **kwargs)
-
-        # Captured by the parent class
-        self.save_hyperparameters(ignore="pseudo_threshold")
+        self.save_hyperparameters()
 
     def training_step(self, batch: dict, batch_idx):
         image = batch["image"]
@@ -45,14 +30,22 @@ class CoarseModel(SingleBaseModel):
             if label is not None:
                 sup_loss = self.criterion(output, label)
 
-            # Need to calculate distance from the mean for binary output
-            abs_mean_deviation = torch.abs(torch.sigmoid(output) - 0.5)
+            channel_dim = 1
 
-            # Mean prediction for each batch
-            q_thres = torch.mean(
-                abs_mean_deviation.view(abs_mean_deviation.size(0), -1), dim=1
+            # q_hat = torch.argmax(output, dim=channel_dim, keepdim=True)
+            q, q_hat = torch.max(
+                torch.softmax(output, dim=channel_dim), dim=channel_dim, keepdim=True
             )
 
+            # Mean prediction for each batch
+            q_thres = torch.mean(q.view(q.size(0), -1), dim=channel_dim)
+
+            # sm_fore = torch.amax(
+            #     torch.softmax(output, dim=channel_dim)[:, 1:, ...], dim=channel_dim
+            # )
+            # q_thres = torch.mean(sm_fore.view(sm_fore.size(0), -1), dim=channel_dim)
+
+            # mask = N
             # Mask per batch
             mask = q_thres >= self.hparams.pseudo_threshold
 
@@ -63,7 +56,7 @@ class CoarseModel(SingleBaseModel):
                 masked_image = image[mask]
 
                 # Calculate masked q_hat
-                masked_q_hat = self.discretize_output(output[mask])
+                masked_q_hat = q_hat[mask]
 
                 # Strong augment image #
                 strong_image = torch.stack(tuple(map(self.strong_aug, masked_image)))
@@ -92,16 +85,20 @@ class CoarseModel(SingleBaseModel):
             return None
         return loss
 
-    def discretize_output(self, output: torch.Tensor) -> torch.Tensor:
-        return output >= self.hparams.output_threshold
-
     def setup(self, stage: Optional[str] = None):
-        super().setup(stage=stage)
+        super().setup(stage)
 
-        # onehot and independent can be anything, but optimized for implementation
+        num_labels_with_bg: int = self.trainer.datamodule.hparams.num_labels_with_bg
+
+        self.post_pred = AsDiscrete(argmax=True, to_onehot=num_labels_with_bg)
+        self.post_label = AsDiscrete(to_onehot=num_labels_with_bg)
+
+        if stage is None or stage == "fit" or stage == "validate":
+            self.image_scaler = 255 / (num_labels_with_bg - 1)
+
         self.keep_connected_component = KeepLargestConnectedComponent(
-            applied_labels=1,
+            applied_labels=range(1, num_labels_with_bg),
             is_onehot=True,
-            independent=False,
+            independent=True,
             connectivity=self.hparams.connectivity,
         )

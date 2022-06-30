@@ -2,17 +2,16 @@ from typing import Iterable, Literal, Optional
 
 import pytorch_lightning as pl
 import torch
+from torch import nn
 from monai.inferers import SlidingWindowInferer
 from monai.losses import DiceCELoss
 from monai.metrics import DiceMetric
-from monai.transforms import AsDiscrete, KeepLargestConnectedComponent
 from monai.visualize.img2tensorboard import add_animated_gif
-from torch import Tensor, nn
 
-from datamodules.datamodule import DataModule
+from datamodules.basedatamodule import BaseDataModule
 
 
-class Segmentor(pl.LightningModule):
+class BaseModel(pl.LightningModule):
 
     val_dice_metric = DiceMetric(include_background=False, reduction="mean_batch")
 
@@ -38,8 +37,6 @@ class Segmentor(pl.LightningModule):
 
     def __init__(
         self,
-        model: nn.Module,
-        model_weights_path: Optional[str] = None,
         pseudo_threshold: float = 0.9,
         unsup_weight: float = 1,
         learning_rate: float = 0.03,
@@ -55,17 +52,7 @@ class Segmentor(pl.LightningModule):
         **kwargs,
     ):
         super().__init__()
-
-        self.save_hyperparameters(ignore=["model", "model_weights_path"])
-
-        if model_weights_path is not None:
-            print("Model weights loaded from:", model_weights_path)
-            model.load_state_dict(torch.load(model_weights_path))
-
-        self.model = model
-
-    def forward(self, image) -> torch.Tensor:
-        return self.model(image)
+        self.save_hyperparameters()
 
     # Using custom or multiple metrics (default_hp_metric=False)
     def on_train_start(self):
@@ -74,79 +61,6 @@ class Segmentor(pl.LightningModule):
                 {"model": self.hparams, "data": self.dm_hparams},
                 {"val/loss": 0, "val/dice_score": 0},
             )
-
-    def training_step(self, batch: dict, batch_idx):
-        image = batch["image"]
-        output: torch.Tensor = self(image)
-
-        common_logger_kwargs = {
-            "on_epoch": True,
-            "batch_size": image.size(0),
-        }
-
-        label = batch.get("label")
-
-        if self.dm_hparams.do_semi:
-            progbar_logger_kwargs = {**common_logger_kwargs, "prog_bar": True}
-
-            sup_loss = 0.0
-            if label is not None:
-                sup_loss = self.criterion(output, label)
-
-            channel_dim = 1
-
-            # q_hat = torch.argmax(output, dim=channel_dim, keepdim=True)
-            q, q_hat = torch.max(
-                torch.softmax(output, dim=channel_dim), dim=channel_dim, keepdim=True
-            )
-
-            # Mean prediction for each batch
-            q_thres = torch.mean(q.view(q.size(0), -1), dim=channel_dim)
-
-            # sm_fore = torch.amax(
-            #     torch.softmax(output, dim=channel_dim)[:, 1:, ...], dim=channel_dim
-            # )
-            # q_thres = torch.mean(sm_fore.view(sm_fore.size(0), -1), dim=channel_dim)
-
-            # mask = N
-            # Mask per batch
-            mask = q_thres >= self.hparams.pseudo_threshold
-
-            unsup_loss = 0.0
-
-            if mask.any():
-                # Only those images with confident pseudo labels
-                masked_image = image[mask]
-
-                # Calculate masked q_hat
-                masked_q_hat = q_hat[mask]
-
-                # Strong augment image #
-                strong_image = torch.stack(tuple(map(self.strong_aug, masked_image)))
-                strong_output = self(strong_image)
-
-                # Measure Dice of strong_output with augmented pseudo_labeled weak one
-                unsup_loss = self.criterion(strong_output, masked_q_hat)
-
-            self.log(
-                "train/unsup_count",
-                mask.sum(dtype=torch.float32),
-                on_epoch=True,
-                reduce_fx="sum",
-            )
-
-            self.log("train/unsup_loss", unsup_loss, **progbar_logger_kwargs)
-            self.log("train/sup_loss", sup_loss, **progbar_logger_kwargs)
-
-            loss = sup_loss + self.hparams.unsup_weight * unsup_loss
-        else:
-            loss = self.criterion(output, label)
-
-        self.log("train/loss", loss, **common_logger_kwargs)
-
-        if loss == 0:
-            return None
-        return loss
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         label = batch["label"]
@@ -168,7 +82,7 @@ class Segmentor(pl.LightningModule):
 
         self.log("val/loss", loss, batch_size=1, prog_bar=True)
 
-    def plot_image(self, image: Tensor, tag: str):
+    def plot_image(self, image: torch.Tensor, tag: str):
         add_animated_gif(
             self.logger.experiment,
             f"{tag}_HWD",
@@ -245,7 +159,7 @@ class Segmentor(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def setup(self, stage: Optional[str] = None):
-        datamodule: DataModule = self.trainer.datamodule
+        datamodule: BaseDataModule = self.trainer.datamodule
         self.roi_size = datamodule.hparams.roi_size
         self.dm_hparams = datamodule.hparams
 
@@ -257,17 +171,6 @@ class Segmentor(pl.LightningModule):
             cache_roi_weight_map=True,
         )
 
-        num_labels_with_bg: int = datamodule.hparams.num_labels_with_bg
-
-        self.post_pred = AsDiscrete(argmax=True, to_onehot=num_labels_with_bg)
-        self.post_label = AsDiscrete(to_onehot=num_labels_with_bg)
-        self.keep_connected_component = KeepLargestConnectedComponent(
-            applied_labels=range(1, num_labels_with_bg),
-            is_onehot=True,
-            independent=True,
-            connectivity=self.hparams.connectivity,
-        )
-
         if stage is None or stage == "predict":
             self.saver = datamodule.saver
         if stage is None or stage == "fit":
@@ -275,8 +178,30 @@ class Segmentor(pl.LightningModule):
             if datamodule.hparams.do_semi:
                 self.strong_aug = datamodule.get_strong_aug()
         if stage is None or stage == "fit" or stage == "validate":
-            self.image_scaler = 255 / (num_labels_with_bg - 1)
             self.is_first_plot = False
+
+
+class SingleBaseModel(BaseModel):
+    """
+    Models with single backbone inside
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        model_weights_path: Optional[str] = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+        if model_weights_path is not None:
+            print("Model weights loaded from:", model_weights_path)
+            model.load_state_dict(torch.load(model_weights_path))
+
+        self.model = model
+
+    def forward(self, image) -> torch.Tensor:
+        return self.model(image)
 
     def save_scripted(self, path: str):
         torch.jit.script(self.model).save(path)

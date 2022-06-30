@@ -8,34 +8,24 @@ import pytorch_lightning as pl
 from monai.data import CacheDataset, DataLoader, Dataset, PersistentDataset
 from monai.transforms import (
     Compose,
-    EnsureChannelFirstd,
-    LoadImaged,
-    NormalizeIntensityd,
-    Orientationd,
     RandAdjustContrast,
     RandGaussianNoise,
     RandGaussianSmooth,
-    RandRotated,
     RandScaleIntensity,
-    RandSpatialCropSamplesd,
-    RandZoomd,
-    SpatialPadd,
-    ToTensord,
 )
 from torch.utils.data import ConcatDataset
 
-from custom_transforms import CustomResized, SimulateLowResolution
+from custom_transforms import SimulateLowResolution
 
 TupleStr = Union[Tuple[str, str], str]
 
 
-class DataModule(pl.LightningDataModule):
+class BaseDataModule(pl.LightningDataModule):
 
     _dict_keys = ("image", "label")
 
     def __init__(
         self,
-        num_labels_with_bg: int,
         supervised_dir: str = ".",
         semisupervised_dir: str = ".",
         predict_dir: str = ".",
@@ -47,12 +37,10 @@ class DataModule(pl.LightningDataModule):
         batch_size: int = 16,
         ds_cache_type: Optional[Literal["mem", "disk"]] = None,
         max_workers: int = 4,
-        roi_size: Tuple[int, int, int] = (128, 128, 64),
         pin_memory: bool = True,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
-
         self.save_hyperparameters()
 
         self.num_workers = min(os.cpu_count(), max_workers)
@@ -166,75 +154,6 @@ class DataModule(pl.LightningDataModule):
         image_paths.sort()
         return image_paths
 
-    def get_transform(
-        self,
-        keys: TupleStr = _dict_keys,
-        do_random: bool = False,
-    ):
-        mode = "bilinear"
-        additional_transforms = []
-        zoom_mode = "trilinear"
-        if not isinstance(keys, str):
-            mode = (mode, "nearest")
-            zoom_mode = (zoom_mode, "nearest")
-            # additional_transforms.append(CastToTyped(keys="label", dtype=np.uint8))
-
-        if do_random:
-            additional_transforms.extend(self.get_weak_aug(keys, mode, zoom_mode))
-
-        return Compose(
-            (
-                LoadImaged(reader="NibabelReader", keys=keys),
-                EnsureChannelFirstd(keys=keys),
-                Orientationd(keys, axcodes="RAI"),
-                CustomResized(
-                    keys=keys,
-                    roi_size=self.hparams.roi_size,
-                    mode=zoom_mode,
-                ),
-                NormalizeIntensityd(keys="image"),
-                *additional_transforms,
-                ToTensord(keys=keys),
-            )
-        )
-
-    def get_weak_aug(
-        self, keys: TupleStr, mode: TupleStr, zoom_mode: Optional[TupleStr] = None
-    ):
-        if zoom_mode is None:
-            zoom_mode = mode
-
-        rot_angle = math.pi / 12
-
-        return (
-            RandRotated(
-                keys=keys,
-                range_x=rot_angle,
-                range_y=rot_angle,
-                range_z=rot_angle,
-                dtype=np.float32,
-                padding_mode="zeros",
-                mode=mode,
-                prob=0.9,
-            ),
-            RandZoomd(
-                keys=keys,
-                min_zoom=0.8,
-                max_zoom=1.3,
-                mode=zoom_mode,
-                prob=0.9,
-                padding_mode="constant",
-                keep_size=False,  # Last spatial padd will handle the case
-            ),
-            RandSpatialCropSamplesd(
-                keys=keys,
-                roi_size=self.hparams.roi_size,
-                num_samples=self.hparams.crop_num_samples,
-                random_size=False,
-            ),
-            SpatialPadd(keys=keys, spatial_size=self.hparams.roi_size),
-        )
-
     @staticmethod
     def get_strong_aug():
         return Compose(
@@ -258,7 +177,10 @@ class DataModule(pl.LightningDataModule):
         elif self.hparams.ds_cache_type == "disk":
             return PersistentDataset(
                 *dataset_args,
-                cache_dir=os.path.basename(self.hparams.supervised_dir) + "_datacache",
-                pickle_protocol=5
+                cache_dir=(
+                    f"{os.path.basename(self.hparams.supervised_dir)}"
+                    f"{__name__}_datacache"
+                ),
+                pickle_protocol=5,
             )
         return Dataset(*dataset_args)

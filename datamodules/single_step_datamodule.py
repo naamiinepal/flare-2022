@@ -4,7 +4,6 @@ from typing import Optional, Tuple
 import numpy as np
 from monai.transforms import (
     Compose,
-    CropForegroundd,
     EnsureChannelFirstd,
     LoadImaged,
     NormalizeIntensityd,
@@ -17,20 +16,17 @@ from monai.transforms import (
 )
 
 from custom_transforms import CustomResized
+from datamodules.basedatamodule import BaseDataModule, TupleStr
 
-from .basedatamodule import BaseDataModule, TupleStr
 
-
-class C2FDataModule(BaseDataModule):
+class SingleStepDataModule(BaseDataModule):
     def __init__(
         self,
-        num_labels_with_bg: int = 14,
-        coarse_roi_size: Tuple[int, int, int] = (128, 128, 64),
-        fine_roi_size: Tuple[int, int, int] = (192, 192, 96),
-        intermediate_roi_size: Tuple[int, int, int] = (256, 256, 128),
-        is_coarse: bool = False,
+        num_labels_with_bg: int,  # Needed by model
+        roi_size: Tuple[int, int, int] = (128, 128, 64),
         **kwargs
     ):
+
         super().__init__(**kwargs)
 
         self.save_hyperparameters()
@@ -43,19 +39,9 @@ class C2FDataModule(BaseDataModule):
         mode = "bilinear"
         additional_transforms = []
         zoom_mode = "trilinear"
-
         if not isinstance(keys, str):
             mode = (mode, "nearest")
             zoom_mode = (zoom_mode, "nearest")
-            # additional_transforms.append(CastToTyped(keys="label", dtype=np.uint8))
-            additional_transforms.append(CropForegroundd(keys=keys, source_key="label"))
-            roi_size = self.hparams.fine_roi_size
-        else:
-            roi_size = self.hparams.intermediate_roi_size
-
-        additional_transforms.append(
-            CustomResized(keys=keys, roi_size=roi_size, mode=zoom_mode)
-        )
 
         if do_random:
             additional_transforms.extend(self.get_weak_aug(keys, mode, zoom_mode))
@@ -64,13 +50,12 @@ class C2FDataModule(BaseDataModule):
             (
                 LoadImaged(reader="NibabelReader", keys=keys),
                 EnsureChannelFirstd(keys=keys),
-                Orientationd(keys=keys, axcodes="RAI"),
-                # CropForegroundd(keys=keys, source_key="label"),
-                # CustomResized(
-                #     keys=keys,
-                #     roi_size=self.hparams.fine_roi_size,
-                #     mode=zoom_mode,
-                # ),
+                Orientationd(keys, axcodes="RAI"),
+                CustomResized(
+                    keys=keys,
+                    roi_size=self.hparams.roi_size,
+                    mode=zoom_mode,
+                ),
                 NormalizeIntensityd(keys="image"),
                 *additional_transforms,
                 ToTensord(keys=keys),
@@ -78,17 +63,8 @@ class C2FDataModule(BaseDataModule):
         )
 
     def get_weak_aug(
-        self,
-        keys: TupleStr,
-        mode: TupleStr,
-        zoom_mode: Optional[TupleStr] = None,
+        self, keys: TupleStr, mode: TupleStr, zoom_mode: Optional[TupleStr] = None
     ):
-        roi_size = (
-            self.hparams.fine_roi_size
-            if not isinstance(keys, str)
-            else self.hparams.intermediate_roi_size
-        )
-
         if zoom_mode is None:
             zoom_mode = mode
 
@@ -116,13 +92,9 @@ class C2FDataModule(BaseDataModule):
             ),
             RandSpatialCropSamplesd(
                 keys=keys,
-                roi_size=roi_size,
+                roi_size=self.hparams.roi_size,
                 num_samples=self.hparams.crop_num_samples,
                 random_size=False,
             ),
-            SpatialPadd(
-                keys=keys,
-                spatial_size=roi_size,
-                mode="constant",
-            ),
+            SpatialPadd(keys=keys, spatial_size=self.hparams.roi_size),
         )

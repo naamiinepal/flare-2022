@@ -5,6 +5,7 @@
     "version": "0.2.0",
     "configurations": [
 
+
         {
             "name":"Debug Fitting",
             "type":"python",
@@ -22,12 +23,13 @@
         },
         {
             "name":"Debug Fine Model",
+            "type": "python",
             "request":"launch",
-            "program":"trainer.py",
+            "program":"c2f_trainer.py",
             "args": [
-                "fit",
+                "predict",
                 "--config",
-                "configs/flare/c2f/dynunet_config.yaml"
+                "configs/flare/c2f/version6.yaml"
             ],
             "env": {
                 "CUDA_LAUNCH_BLOCKING": "1"
