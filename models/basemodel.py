@@ -52,7 +52,6 @@ class BaseModel(pl.LightningModule):
         **kwargs,
     ):
         super().__init__()
-        self.save_hyperparameters()
 
     # Using custom or multiple metrics (default_hp_metric=False)
     def on_train_start(self):
@@ -118,6 +117,8 @@ class BaseModel(pl.LightningModule):
         }
 
         for i, out in enumerate(output):
+            if self.hparams.do_post_process:
+                out = self.keep_connected_component(self.post_pred(out))
             argmax_out = out.argmax(dim=0)
             meta_data = {k: v[i] for k, v in batch_meta_data.items()}
             self.saver(argmax_out, meta_data)
@@ -169,6 +170,7 @@ class BaseModel(pl.LightningModule):
             self.hparams.sw_overlap,
             mode=self.hparams.sw_mode,
             cache_roi_weight_map=True,
+            # device="cpu",
         )
 
         if stage is None or stage == "predict":

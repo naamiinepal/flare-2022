@@ -4,7 +4,7 @@ from monai.networks.nets import UNet
 from pytorch_lightning import Trainer
 
 from datamodules.single_step_datamodule import SingleStepDataModule
-from segmentor import Segmentor
+from models.single_step_model import SingleStepModel
 
 
 def main(params):
@@ -22,7 +22,7 @@ def main(params):
 
     print("Using checkpoint:", checkpoint_path)
 
-    model = Segmentor.load_from_checkpoint(
+    model = SingleStepModel.load_from_checkpoint(
         checkpoint_path, model=base_model, sw_batch_size=16, sw_overlap=0.25
     )
 

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Iterable, Optional
 
 import torch
 from monai.losses import DiceCELoss
@@ -22,10 +22,7 @@ class CoarseModel(SingleBaseModel):
         The pseudo_threshold is 0.5 less than the one used in other models
         Because this model is binary
         """
-        super.__init(pseudo_threshold=pseudo_threshold, **kwargs)
-
-        # Captured by the parent class
-        self.save_hyperparameters(ignore="pseudo_threshold")
+        super().__init__(pseudo_threshold=pseudo_threshold, **kwargs)
 
     def training_step(self, batch: dict, batch_idx):
         image = batch["image"]
@@ -95,6 +92,56 @@ class CoarseModel(SingleBaseModel):
     def discretize_output(self, output: torch.Tensor) -> torch.Tensor:
         return output >= self.hparams.output_threshold
 
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
+        label = batch["label"]
+        image = batch["image"]
+
+        output = self.sliding_inferer(image, self)
+
+        if self.logger is not None and batch_idx == 0:
+            self.plot_image(self.discretize_output(output), tag="pred")
+
+            # Plot label only once
+            if not self.is_first_plot:
+                self.plot_image(label, tag="label")
+                self.is_first_plot = True
+
+        self.compute_dice_score(output, label)
+
+        loss = self.criterion(output, label)
+
+        self.log("val/loss", loss, batch_size=1, prog_bar=True)
+
+    def validation_epoch_end(self, outputs):
+        dice_score = self.val_dice_metric.aggregate()
+        self.val_dice_metric.reset()
+
+        self.log("val/dice_score", dice_score, prog_bar=True)
+
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
+        image = batch["image"]
+
+        output = self.sliding_inferer(image, self)
+
+        batch_meta_data = {
+            k: v.cpu() if isinstance(v, torch.Tensor) else v
+            for k, v in batch["image_meta_dict"].items()
+        }
+
+        for i, out in enumerate(output):
+            pred_out = self.descretize_output(out)
+            meta_data = {k: v[i] for k, v in batch_meta_data.items()}
+            self.saver(pred_out, meta_data)
+
+    def compute_dice_score(
+        self, output: Iterable[torch.Tensor], label: Iterable[torch.Tensor]
+    ):
+        post_output = self.discretize_output(output.squeeze(0))
+        if self.hparams.do_post_process:
+            post_output = self.keep_connected_component(post_output)
+
+        self.val_dice_metric(post_output.unsqueeze(0), label)
+
     def setup(self, stage: Optional[str] = None):
         super().setup(stage=stage)
 
@@ -105,3 +152,5 @@ class CoarseModel(SingleBaseModel):
             independent=False,
             connectivity=self.hparams.connectivity,
         )
+
+        self.image_scaler = 255

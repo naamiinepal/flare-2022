@@ -11,6 +11,7 @@ from custom_transforms import (  # NormalizeAndClipIntensityd,
     Binarized,
     BinaryConvexHull,
     CustomResized,
+    NormalizeAndClipIntensityd,
 )
 from datamodules.basedatamodule import BaseDataModule, TupleStr
 
@@ -50,7 +51,7 @@ class CoarseDataModule(BaseDataModule):
                     roi_size=self.hparams.roi_size,
                     mode=zoom_mode,
                 ),
-                HistogramNormalized(keys="image", min=-1, max=1),
+                NormalizeAndClipIntensityd(keys="image"),
                 *additional_transforms,
                 ToTensord(keys=keys),
             )

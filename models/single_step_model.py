@@ -10,8 +10,6 @@ class SingleStepModel(SingleBaseModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.save_hyperparameters()
-
     def training_step(self, batch: dict, batch_idx):
         image = batch["image"]
         output: torch.Tensor = self(image)

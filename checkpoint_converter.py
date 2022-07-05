@@ -1,23 +1,36 @@
+import torch_tensorrt
 from monai.networks.nets import UNet
 
-from segmentor import Segmentor
+from models.c2f import C2FSegmentor
 
-base_model = UNet(
+# coarse_checkpoint = "flare_coarse_model.pt"
+fine_checkpoint_path = (
+    "checkpoints/c2f/c2f-fine-unet-l5-s16-256-new/epoch=48-val/loss=0.35.ckpt"
+)
+
+coarse_model = UNet(
     spatial_dims=3,
     in_channels=1,
-    out_channels=14,
-    channels=(4, 8, 16, 32, 64, 128, 256),
-    strides=(2, 2, 2, 2, 2, 2),
-    num_res_units=3,
+    out_channels=1,
+    channels=(4, 8, 16, 32, 64),
+    strides=(2, 2, 2, 2),
     act="relu",
 )
 
-# "checkpoints/unet-l7-s4-256-spacing-res2-weak-aug/epoch=77-val/loss=0.49.ckpt"
-checkpoint_path = "checkpoints/unet-l7-s4-256-customresize-res3-semi-diCE0.25/epoch=129-val/loss=0.45-v1.ckpt"
-
-model = Segmentor.load_from_checkpoint(
-    checkpoint_path, model=base_model, model_weights_path=None
+fine_model = UNet(
+    spatial_dims=3,
+    in_channels=1,
+    out_channels=14,
+    channels=(16, 32, 64, 128, 256),
+    strides=(2, 2, 2, 2),
+    act="relu",
 )
 
-# model.save_scripted("flare_supervised_checkpoint.pt")
-model.save_model("flare_supervised_unscripted.pt")
+model = C2FSegmentor.load_from_checkpoint(
+    checkpoint_path=fine_checkpoint_path,
+    coarse_model=coarse_model,
+    fine_model=fine_model,
+)
+
+# model.save_model("flare_model.pt")
+model.save_scripted("flare_model.ts", use_tensorrt=True)

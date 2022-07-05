@@ -2,3 +2,5 @@ torch
 monai
 numpy
 nibabel
+scipy
+scikit-image

@@ -31,13 +31,14 @@ class BaseDataModule(pl.LightningDataModule):
         predict_dir: str = ".",
         output_dir: str = ".",
         val_ratio: float = 0.2,
-        do_semi: float = False,
+        do_semi: bool = False,
         semi_mu: Optional[int] = None,
         crop_num_samples: int = 4,
         batch_size: int = 16,
         ds_cache_type: Optional[Literal["mem", "disk"]] = None,
         max_workers: int = 4,
         pin_memory: bool = True,
+        roi_size: Optional[Tuple[int, int, int]] = [128, 128, 64],
         **kwargs,
     ):
         super().__init__()
@@ -120,6 +121,17 @@ class BaseDataModule(pl.LightningDataModule):
                 separate_folder=False,
                 print_log=False,
             )
+        # NOTE: This is a temp workaround to view validation results, delete later
+        from saver import NiftiSaver
+        self.saver = NiftiSaver(
+                self.hparams.output_dir,
+                output_postfix="",
+                mode="nearest",
+                dtype=np.float32,
+                output_dtype=np.uint8,
+                separate_folder=False,
+                print_log=False,
+            )
 
     def train_dataloader(self):
         return DataLoader(
@@ -178,8 +190,8 @@ class BaseDataModule(pl.LightningDataModule):
             return PersistentDataset(
                 *dataset_args,
                 cache_dir=(
-                    f"{os.path.basename(self.hparams.supervised_dir)}"
-                    f"{__name__}_datacache"
+                    f"{os.path.basename(self.hparams.supervised_dir)}_"
+                    f"{self.__class__.__name__}_datacache"
                 ),
                 pickle_protocol=5,
             )

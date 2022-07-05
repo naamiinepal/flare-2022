@@ -6,8 +6,8 @@ from monai.transforms import (
     Compose,
     CropForegroundd,
     EnsureChannelFirstd,
+    HistogramNormalized,
     LoadImaged,
-    NormalizeIntensityd,
     Orientationd,
     RandRotated,
     RandSpatialCropSamplesd,
@@ -28,10 +28,9 @@ class C2FDataModule(BaseDataModule):
         coarse_roi_size: Tuple[int, int, int] = (128, 128, 64),
         fine_roi_size: Tuple[int, int, int] = (192, 192, 96),
         intermediate_roi_size: Tuple[int, int, int] = (256, 256, 128),
-        is_coarse: bool = False,
         **kwargs
     ):
-        super().__init__(**kwargs)
+        super().__init__(roi_size=intermediate_roi_size, **kwargs)
 
         self.save_hyperparameters()
 
@@ -65,13 +64,7 @@ class C2FDataModule(BaseDataModule):
                 LoadImaged(reader="NibabelReader", keys=keys),
                 EnsureChannelFirstd(keys=keys),
                 Orientationd(keys=keys, axcodes="RAI"),
-                # CropForegroundd(keys=keys, source_key="label"),
-                # CustomResized(
-                #     keys=keys,
-                #     roi_size=self.hparams.fine_roi_size,
-                #     mode=zoom_mode,
-                # ),
-                NormalizeIntensityd(keys="image"),
+                HistogramNormalized(keys="image", min=-1, max=1),
                 *additional_transforms,
                 ToTensord(keys=keys),
             )
