@@ -3,7 +3,6 @@ import math
 import os.path
 from argparse import ArgumentParser, Namespace
 from glob import glob
-import sys
 
 import numpy as np
 import torch
@@ -19,24 +18,17 @@ from monai.transforms import (
 )
 from torch.nn import functional as F
 
-from custom_transforms import CustomResized
+from custom_transforms import CustomResize, CustomResized
 from saver import NiftiSaver
-
-# from saver import NiftiSaver
 
 num_labels_with_bg = 14
 intermediate_roi_size = (256, 256, 128)
 coarse_roi_size = (128, 128, 64)
 fine_roi_size = (192, 192, 96)
 coarse_scale = np.asarray(intermediate_roi_size) / np.asarray(coarse_roi_size)
+inverse_coarse_scale = tuple(1 / coarse_scale)
 
-
-def resize_fine(image: torch.Tensor) -> torch.Tensor:
-    return F.interpolate(
-        input=image.unsqueeze(0),
-        size=fine_roi_size,
-        mode="trilinear",
-    ).squeeze(0)
+resize_fine = CustomResize(roi_size=fine_roi_size, image_only=True)
 
 
 def main(params: Namespace):
@@ -64,13 +56,22 @@ def main(params: Namespace):
         mode="nearest",
         padding_mode="zeros",
         separate_folder=False,
+        channel_dim=0,
         print_log=params.verbose,  # make false for docker
     )
 
     device = torch.device("cpu" if params.gpu_index < 0 else f"cuda:{params.gpu_index}")
 
-    sliding_inferer = SlidingWindowInferer(
-        intermediate_roi_size,
+    coarse_sliding_inferer = SlidingWindowInferer(
+        coarse_roi_size,
+        params.sw_batch_size,
+        params.sw_overlap,
+        mode="gaussian",
+        cache_roi_weight_map=True,
+    )
+
+    fine_sliding_inferer = SlidingWindowInferer(
+        fine_roi_size,
         params.sw_batch_size,
         params.sw_overlap,
         mode="gaussian",
@@ -88,7 +89,6 @@ def main(params: Namespace):
         )
 
         keep_connected_component_coarse = KeepLargestConnectedComponent(
-            is_onehot=True,
             independent=False,
             connectivity=params.connectivity,
         )
@@ -106,37 +106,29 @@ def main(params: Namespace):
         torch.jit.load(params.fine_ckpt_path, map_location=device)
     )
 
-    def forward(image: torch.Tensor):
-        coarse_image = F.interpolate(
-            input=image,
-            size=coarse_roi_size,
-            mode="trilinear",
-        )
-
-        coarse_output: np.ndarray = (coarse_model(coarse_image) >= 0.5).cpu().numpy()
-
-        img_shape = image.shape
-        final_output = (
-            torch.tensor(
-                (sys.maxsize, *((-sys.maxsize,) * (num_labels_with_bg - 1))),
-                dtype=torch.float32,
-                device=device,
+    with torch.inference_mode():
+        for batch in dl:
+            image = batch["image"].to(device)
+            coarse_image = F.interpolate(
+                input=image,
+                scale_factor=inverse_coarse_scale,
+                mode="trilinear",
+                recompute_scale_factor=True,
             )
-            .expand((img_shape[0], *img_shape[2:], num_labels_with_bg))
-            .movedim(-1, 1)
-            .clone()  # To have different memory locations
-        )
 
-        has_mask = coarse_output.any()
-        if has_mask:
-            cropped_images = []
-            cropped_indices = []
+            coarse_output: np.ndarray = (
+                (coarse_sliding_inferer(coarse_image, coarse_model) >= 0.5)
+                .squeeze(0)
+                .cpu()
+                .numpy()
+            )
 
-            for c_out, img in zip(coarse_output, image):
+            final_output = torch.zeros(image.shape[1:], dtype=int, device=device)
+
+            if coarse_output.any():
                 if params.post_process:
-                    c_out = keep_connected_component_coarse(c_out)
-                c_out = c_out.squeeze(0)
-                x_indices, y_indices, z_indices = np.where(c_out)
+                    coarse_output = keep_connected_component_coarse(coarse_output)
+                x_indices, y_indices, z_indices = np.where(coarse_output.squeeze(0))
 
                 # Multiplying less scale rather than all the indices
                 x1 = int(x_indices.min() * coarse_scale[0])
@@ -145,35 +137,28 @@ def main(params: Namespace):
                 y2 = math.ceil(y_indices.max() * coarse_scale[1])
                 z1 = int(z_indices.min() * coarse_scale[2])
                 z2 = math.ceil(z_indices.max() * coarse_scale[2])
-                cropped_indices.append((x1, x2, y1, y2, z1, z2))
-                cropped_images.append(img[:, x1 : x2 + 1, y1 : y2 + 1, z1 : z2 + 1])
+                cropped_image = image[0, :, x1 : x2 + 1, y1 : y2 + 1, z1 : z2 + 1]
 
-            # (B, 1, H, W, D)
-            fine_image = torch.stack(tuple(map(resize_fine, cropped_images)))
+                # Add batch to pass in the inferrer
+                fine_image = resize_fine(cropped_image).unsqueeze(0)
 
-            # (B, 14, H, W, D)
-            # Convert to float for interpolation
-            # Where to perfoc_outrm interpolation
-            output = fine_model(fine_image).cpu()
-            for i, (o, crop_img, ind) in enumerate(
-                zip(output, cropped_images, cropped_indices)
-            ):
+                # (B, 14, H, W, D)
+                # Convert to float for interpolation
+                # Where to perfoc_outrm interpolation
+                output = (
+                    fine_sliding_inferer(fine_image, fine_model).argmax(
+                        dim=1, keepdim=True
+                    )
+                    # .cpu()
+                )
                 scaled_out = F.interpolate(
-                    input=o.unsqueeze(0),
-                    size=crop_img.shape[1:],
-                    mode="trilinear",  # (-inf, inf) range of output
+                    input=output.float(),
+                    size=cropped_image.shape[-3:],
+                    mode="nearest",  # (-inf, inf) range of output
                 ).squeeze(0)
-                x1, x2, y1, y2, z1, z2 = ind
-                final_output[i][:, x1 : x2 + 1, y1 : y2 + 1, z1 : z2 + 1] = scaled_out
-        return final_output
+                final_output[:, x1 : x2 + 1, y1 : y2 + 1, z1 : z2 + 1] = scaled_out
 
-    with torch.inference_mode():
-        for batch in dl:
-            image = batch["image"].to(device)
-
-            output = sliding_inferer(image, forward)
-
-            argmax_out = output.squeeze(0).argmax(0).cpu().numpy()
+            argmax_out = final_output.cpu().numpy()
 
             if params.post_process:
                 argmax_out = keep_connected_component(argmax_out)

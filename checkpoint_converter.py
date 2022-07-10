@@ -1,4 +1,3 @@
-import torch_tensorrt
 from monai.networks.nets import UNet
 
 from models.c2f import C2FSegmentor

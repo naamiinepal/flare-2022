@@ -18,7 +18,7 @@ from monai.transforms import (
 
 from custom_transforms import CustomResized
 
-from .basedatamodule import BaseDataModule, TupleStr
+from . import BaseDataModule, TupleStr
 
 
 class C2FDataModule(BaseDataModule):

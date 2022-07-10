@@ -5,7 +5,7 @@ from monai.losses import DiceCELoss
 from monai.metrics import DiceMetric
 from monai.transforms import KeepLargestConnectedComponent
 
-from models.basemodel import SingleBaseModel
+from . import SingleBaseModel
 
 
 class CoarseModel(SingleBaseModel):
@@ -98,7 +98,7 @@ class CoarseModel(SingleBaseModel):
 
         output = self.sliding_inferer(image, self)
 
-        if self.logger is not None and batch_idx == 0:
+        if not self.trainer.fast_dev_run and self.logger is not None and batch_idx == 0:
             self.plot_image(self.discretize_output(output), tag="pred")
 
             # Plot label only once
@@ -129,7 +129,9 @@ class CoarseModel(SingleBaseModel):
         }
 
         for i, out in enumerate(output):
-            pred_out = self.descretize_output(out)
+            pred_out = self.discretize_output(out)
+            if self.hparams.do_post_process:
+                pred_out = self.keep_connected_component(pred_out)
             meta_data = {k: v[i] for k, v in batch_meta_data.items()}
             self.saver(pred_out, meta_data)
 
@@ -138,7 +140,9 @@ class CoarseModel(SingleBaseModel):
     ):
         post_output = self.discretize_output(output.squeeze(0))
         if self.hparams.do_post_process:
+            # old_output = post_output.clone()
             post_output = self.keep_connected_component(post_output)
+            # print("Diff: ", (post_output ^ old_output).sum())
 
         self.val_dice_metric(post_output.unsqueeze(0), label)
 
@@ -147,8 +151,6 @@ class CoarseModel(SingleBaseModel):
 
         # onehot and independent can be anything, but optimized for implementation
         self.keep_connected_component = KeepLargestConnectedComponent(
-            applied_labels=1,
-            is_onehot=True,
             independent=False,
             connectivity=self.hparams.connectivity,
         )

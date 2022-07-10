@@ -1,11 +1,10 @@
-seed_everything: null
+seed_everything: 42
 trainer:
   logger:
       class_path: pytorch_lightning.loggers.TensorBoardLogger
       init_args:
           save_dir: coarse_logs
-          name: unet-l5-s4-256-customresize-semi-kernel-553
-          version: no_hull
+          name: unet-l5-s4-64-customresize-semi-kernel-553
           log_graph: True
           default_hp_metric: False
   callbacks:
@@ -14,7 +13,7 @@ trainer:
         save_top_k: 10
         monitor: ${model.init_args.monitor}
         mode: min
-        dirpath: checkpoints/coarse/unet-l5-s4-256-customresize-semi-kernel-553
+        dirpath: checkpoints/coarse/unet-l5-s4-64-customresize-semi-kernel-553
         save_weights_only: True
         filename: "{epoch:02d}-{val\/loss:.2f}"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
@@ -65,8 +64,9 @@ data:
     val_ratio: 0.2
     do_semi: True
     semi_mu: 30
-    crop_num_samples: 2
+    crop_num_samples: 4
     batch_size: ${.crop_num_samples}
     ds_cache_type: disk
     max_workers: 4
     roi_size: [128, 128, 64]
+    transform: null

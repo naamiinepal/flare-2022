@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from monai.transforms import AsDiscrete, KeepLargestConnectedComponent
 from torch import Tensor, nn
 
-from models.basemodel import BaseModel
+from . import BaseModel
 
 
 class C2FSegmentor(BaseModel):
@@ -254,7 +254,6 @@ class C2FSegmentor(BaseModel):
             self.image_scaler = 255 / (num_labels_with_bg - 1)
 
         self.keep_connected_component_coarse = KeepLargestConnectedComponent(
-            is_onehot=True,
             independent=False,
             connectivity=self.hparams.connectivity,
         )

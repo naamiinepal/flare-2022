@@ -3,7 +3,7 @@ from typing import Optional
 import torch
 from monai.transforms import AsDiscrete, KeepLargestConnectedComponent
 
-from models.basemodel import SingleBaseModel
+from . import SingleBaseModel
 
 
 class SingleStepModel(SingleBaseModel):

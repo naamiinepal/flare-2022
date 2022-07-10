@@ -65,8 +65,8 @@ model:
 data:
   supervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50
   semisupervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/Unlabeled
-  predict_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Validation
-  output_dir: /home/safal/naamii_togai_amigos
+  predict_dir: /home/safal/test_demo
+  output_dir: /home/safal/old_outputs
   do_semi: True
   semi_mu: 30
   num_labels_with_bg: 14

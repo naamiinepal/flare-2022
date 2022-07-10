@@ -1,22 +1,16 @@
-import math
-from typing import Optional, Tuple
+from typing import Tuple
 
-import numpy as np
 from monai.transforms import (
     Compose,
     EnsureChannelFirstd,
     LoadImaged,
     NormalizeIntensityd,
     Orientationd,
-    RandRotated,
-    RandSpatialCropSamplesd,
-    RandZoomd,
-    SpatialPadd,
     ToTensord,
 )
 
 from custom_transforms import CustomResized
-from datamodules.basedatamodule import BaseDataModule, TupleStr
+from . import BaseDataModule, TupleStr
 
 
 class SingleStepDataModule(BaseDataModule):
@@ -60,41 +54,4 @@ class SingleStepDataModule(BaseDataModule):
                 *additional_transforms,
                 ToTensord(keys=keys),
             )
-        )
-
-    def get_weak_aug(
-        self, keys: TupleStr, mode: TupleStr, zoom_mode: Optional[TupleStr] = None
-    ):
-        if zoom_mode is None:
-            zoom_mode = mode
-
-        rot_angle = math.pi / 12
-
-        return (
-            RandRotated(
-                keys=keys,
-                range_x=rot_angle,
-                range_y=rot_angle,
-                range_z=rot_angle,
-                dtype=np.float32,
-                padding_mode="zeros",
-                mode=mode,
-                prob=0.9,
-            ),
-            RandZoomd(
-                keys=keys,
-                min_zoom=0.8,
-                max_zoom=1.3,
-                mode=zoom_mode,
-                prob=0.9,
-                padding_mode="constant",
-                keep_size=False,  # Last spatial padd will handle the case
-            ),
-            RandSpatialCropSamplesd(
-                keys=keys,
-                roi_size=self.hparams.roi_size,
-                num_samples=self.hparams.crop_num_samples,
-                random_size=False,
-            ),
-            SpatialPadd(keys=keys, spatial_size=self.hparams.roi_size),
         )
