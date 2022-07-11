@@ -25,7 +25,7 @@ trainer:
   devices: [0] # None can not be returned in multiple GPUs
   max_epochs: 200
   accelerator: "gpu"
-  log_every_n_steps: 256
+  log_every_n_steps: 128
   accumulate_grad_batches: 128 # Actual batch size
   val_check_interval: 0.25
 ckpt_path: null
@@ -43,11 +43,11 @@ model:
         channels: [16, 16, 32, 32, 64]
         strides: [2, 2, 2, 2]
         act: relu
-    model_weights_path: coarse_boundingbox_sup.pt
+    model_weights_path: coarse_boundingmask_sup.pt
     output_threshold: 0.5
     pseudo_threshold: 0.45 # Distance from 0.5 for binary
-    unsup_weight: 0.01
-    learning_rate: 0.05
+    unsup_weight: 0.005
+    learning_rate: 0.01
     sw_batch_size: 4
     sw_overlap: 0.25
     sw_mode: gaussian

@@ -2,7 +2,8 @@
 
 from pytorch_lightning.utilities.cli import LightningCLI
 
-from models.basemodel import BaseDataModule, BaseModel
+from models import BaseModel
+from datamodules import BaseDataModule
 
 # Removing datamodule_class doesn't work for the data
 cli = LightningCLI(

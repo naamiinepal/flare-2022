@@ -41,7 +41,7 @@
             "program":"predict_c2f_scratch.py",
             "args": [
                 "--predict_dir","datasets/FLARE2022/Validation/",
-                "--output_dir","last_submission",
+                "--output_dir","/home/safal/output",
                 "--sw_batch_size","4",
                 "--num_workers","4",
                 "--post_process","true"
