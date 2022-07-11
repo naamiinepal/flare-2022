@@ -1,2 +1,2 @@
 #!/usr/bin/sh
-python predict_scratch.py
+python predict_c2f_scratch.py

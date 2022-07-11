@@ -1,0 +1,49 @@
+seed_everything: 42
+trainer:
+  logger: False
+  # devices: [0] # None can not be returned in multiple GPUs
+  max_epochs: 1
+  accelerator: "cpu"
+model:
+  class_path: models.coarse_model.CoarseModel
+  init_args:
+    model:
+      class_path: monai.networks.nets.UNet
+      init_args:
+        spatial_dims: 3
+        in_channels: 1
+        out_channels: 1
+        kernel_size: [5, 5, 3]
+        up_kernel_size: [5, 5, 3]
+        channels: [16, 16, 32, 32, 64]
+        strides: [2, 2, 2, 2]
+        act: relu
+    model_weights_path: coarse_boundingmask_sup.pt
+    output_threshold: 0.5
+    pseudo_threshold: 0.45 # Distance from 0.5 for binary
+    unsup_weight: 0.05
+    learning_rate: 0.05
+    sw_batch_size: 4
+    sw_overlap: 0.25
+    sw_mode: gaussian
+    plateu_patience: 3
+    plateu_factor: 0.2
+    monitor: val/loss
+    do_post_process: true
+    connectivity: 1
+data:
+  class_path: datamodules.coarse_datamodule.CoarseDataModule
+  init_args:
+    supervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50
+    semisupervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/Unlabeled
+    predict_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Validation
+    output_dir: /mnt/HDD2/flare2022/coarse_output_boundingmask
+    val_ratio: 0.2
+    do_semi: False
+    semi_mu: 30
+    crop_num_samples: 2
+    batch_size: 8
+    ds_cache_type: null
+    max_workers: 4
+    roi_size: [128, 128, 64]
+    transform: boundingmask

@@ -5,11 +5,11 @@ CMD mkdir -p /workspace/inputs /workspace/outputs
 WORKDIR /workspace
 
 # Install requirements
-COPY requirements.txt ./
+COPY docker_requirements.txt requirements.txt
 RUN pip install --no-cache-dir -qr requirements.txt
 
 # Copy Codes
-COPY predict_scratch.py saver.py predict.sh ./
+COPY predict_c2f_scratch.py saver.py predict.sh custom_transforms.py ./
 
 # Copy checkpoints
-COPY abdomen_checkpoint.pt ./
+COPY coarse_flare_model.ts fine_flare_model.ts ./

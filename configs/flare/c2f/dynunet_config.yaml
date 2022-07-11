@@ -1,0 +1,89 @@
+seed_everything: null
+trainer:
+  logger:
+    class_path: pytorch_lightning.loggers.TensorBoardLogger
+    init_args:
+        save_dir: fine_logs
+        name: c2f-fine-dynunet
+        log_graph: True
+        default_hp_metric: False
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        save_top_k: 10
+        monitor: ${model.init_args.monitor}
+        mode: min
+        dirpath: checkpoints/c2f-fine-dynunet
+        save_weights_only: True
+        filename: "{epoch:02d}-{val\/loss:.2f}"
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+    - class_path: pytorch_lightning.callbacks.EarlyStopping
+      init_args:
+        monitor: ${model.init_args.monitor}
+        patience: 40
+        verbose: True
+  # devices: [0] # None can not be returned in multiple GPUs
+  max_epochs: 200
+  accelerator: "cpu"
+  log_every_n_steps: 10
+  # accumulate_grad_batches: 128 # Actual batch size
+  # val_check_interval: 0.5
+  fast_dev_run: true
+
+model:
+  class_path: models.c2f.C2FSegmentor
+  init_args:
+    coarse_model:
+      class_path: monai.networks.nets.UNet
+      init_args:
+        spatial_dims: 3
+        in_channels: 1
+        out_channels: ${data.init_args.num_labels_with_bg}
+        channels: [8, 16, 32, 64, 128]
+        strides: [2, 2, 2, 2]
+        # num_res_units: 3
+        act: relu
+    fine_model:
+      class_path: monai.networks.nets.DynUNet
+      init_args:
+        spatial_dims: 3
+        in_channels: 1
+        out_channels: ${data.init_args.num_labels_with_bg}
+        kernel_size: [[3, 3, 3], [3, 3, 3], [3, 3, 3], [3, 3, 3], [3, 3, 3], [3, 3, 3]]
+        strides: [[1, 1, 1], [2, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 1]]
+        upsample_kernel_size: [[2, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 1]]
+        act_name: "relu"
+        norm_name: "instance"
+    pseudo_threshold: 0.9
+    unsup_weight: 1.0
+    learning_rate: 0.05
+    sw_batch_size: 4
+    sw_overlap: 0.1
+    sw_mode: gaussian
+    plateu_patience: 2
+    plateu_factor: 0.1
+    momentum: 0.9
+    monitor: val/loss
+    do_post_process: true
+    is_coarse: false
+    connectivity: 1
+    coarse_model_weights_path: null
+    fine_model_weights_path: null
+data:
+  class_path: datamodules.c2f_datamodule.C2FDataModule
+  init_args:
+    num_labels_with_bg: 14
+    supervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50
+    semisupervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/Unlabeled
+    predict_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Validation
+    output_dir: /mnt/HDD2/flare2022/fine_output
+    val_ratio: 0.2
+    do_semi: False
+    semi_mu: null
+    crop_num_samples: 2
+    batch_size: 32
+    ds_cache_type: disk
+    max_workers: 4
+    coarse_roi_size: [128, 128, 64]
+    fine_roi_size: [192, 192, 96]
+    is_coarse: ${model.init_args.is_coarse}

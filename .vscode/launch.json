@@ -5,12 +5,59 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name":"Debug Fitting",
+            "type":"python",
+            "request":"launch",
+            "program":"trainer.py",
+            "args": [
+                "fit",
+                "--config",
+                "configs/flare/coarse/version1.yaml"
+            ],
+            "env": {
+                "CUDA_LAUNCH_BLOCKING": "1"
+            },
+            "justMyCode":false
+        },
+        {
+            "name":"Debug Fine Model",
+            "type": "python",
+            "request":"launch",
+            "program":"c2f_trainer.py",
+            "args": [
+                "predict",
+                "--config",
+                "configs/flare/c2f/version6.yaml"
+            ],
+            "env": {
+                "CUDA_LAUNCH_BLOCKING": "1"
+            },
+            "justMyCode":false
+        },
+        {
+            "name":"Debug Submission",
+            "type": "python",
+            "request":"launch",
+            "program":"predict_c2f_scratch.py",
+            "args": [
+                "--predict_dir","datasets/FLARE2022/Validation/",
+                "--output_dir","/home/safal/output",
+                "--sw_batch_size","4",
+                "--num_workers","4",
+                "--post_process","true"
+            ],
+            "env": {
+                "CUDA_LAUNCH_BLOCKING": "1"
+            },
+            "justMyCode":false
+        },
+        {
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": true
-        }
+            "justMyCode": false
+        },
     ]
 }

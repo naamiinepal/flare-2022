@@ -1,0 +1,69 @@
+seed_everything: 42
+trainer:
+  logger:
+      class_path: pytorch_lightning.loggers.TensorBoardLogger
+      init_args:
+          save_dir: coarse_logs
+          name: unet-l5-s4-64-customresize-semi-diCE0.25
+          log_graph: True
+          default_hp_metric: False
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        save_top_k: 10
+        monitor: ${model.init_args.monitor}
+        mode: min
+        dirpath: checkpoints/coarse/unet-l5-s4-64-customresize-semi-diCE0.25
+        save_weights_only: True
+        filename: "{epoch:02d}-{val\/loss:.2f}"
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+    - class_path: pytorch_lightning.callbacks.EarlyStopping
+      init_args:
+        monitor: ${model.init_args.monitor}
+        patience: 80
+        verbose: True
+  devices: [0] # None can not be returned in multiple GPUs
+  max_epochs: 200
+  accelerator: "gpu"
+  log_every_n_steps: 256
+  accumulate_grad_batches: 64 # Actual batch size
+  val_check_interval: 0.25
+model:
+  class_path: models.coarse_model.CoarseModel
+  init_args:
+    model:
+      class_path: monai.networks.nets.UNet
+      init_args:
+        spatial_dims: 3
+        in_channels: 1
+        out_channels: 1
+        channels: [4, 8, 16, 32, 64]
+        strides: [2, 2, 2, 2]
+        act: relu
+    model_weights_path: null
+    output_threshold: 0.5
+    pseudo_threshold: 0.45 # Distance from 0.5 for binary
+    unsup_weight: 0.05
+    learning_rate: 0.05
+    sw_batch_size: 4
+    sw_overlap: 0.25
+    sw_mode: gaussian
+    plateu_patience: 3
+    plateu_factor: 0.2
+    monitor: val/loss
+    do_post_process: false
+    connectivity: null
+data:
+  class_path: datamodules.coarse_datamodule.CoarseDataModule
+  init_args:
+    supervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50
+    semisupervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/Unlabeled
+    val_ratio: 0.2
+    do_semi: True
+    semi_mu: 30
+    crop_num_samples: 4
+    batch_size: ${.crop_num_samples}
+    ds_cache_type: disk
+    max_workers: 4
+    roi_size: [128, 128, 64]
+    transform: hull

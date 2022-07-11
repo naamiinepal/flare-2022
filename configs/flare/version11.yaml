@@ -5,7 +5,7 @@ trainer:
       init_args:
           save_dir: tb_logs
           name: unet
-          version: unet-l6-s8-256-newloss-aug-samp
+          version: unet-l6-s8-256-new-spacing
           log_graph: True
           default_hp_metric: False
   callbacks:
@@ -16,7 +16,7 @@ trainer:
         mode: min
         dirpath: checkpoints
         save_weights_only: True
-        filename: "unet-l6-s8-256-newloss-aug-samp-{epoch:02d}-{val/loss:.2f}"
+        filename: "unet-l6-s8-256-new-spacing-{epoch:02d}-{val/loss:.2f}"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
@@ -26,7 +26,7 @@ trainer:
   max_epochs: 100
   accelerator: "gpu"
   strategy: null
-  log_every_n_steps: 25
+  log_every_n_steps: 5
 model:
   model:
     class_path: monai.networks.nets.UNet
@@ -38,7 +38,7 @@ model:
       strides: [2, 2, 2, 2, 2]
   learning_rate: 0.05
   sw_batch_size: ${data.crop_num_samples}
-  sw_overlap: 0.25
+  sw_overlap: 0.1
   plateu_patience: 3
   plateu_factor: 0.1
   monitor: val/loss
@@ -46,12 +46,9 @@ data:
   supervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50
   num_labels_with_bg: 14
   val_ratio: 0.2
-  crop_num_samples: 8
-  batch_size: 8
-  ds_cache_type: disk
-  max_workers: 3
-  roi_size: [192, 224, 64]
-  #  the following values are obtained by running calculate_params.py
-  spacing: [0.8, 0.8, 2.5]
-  normalize_values: [96.07, 140.74]
-  clip_values: [-961.0, 266.0]
+  crop_num_samples: 4
+  batch_size: 32
+  ds_cache_type: mem
+  max_workers: 4
+  roi_size: [96, 96, 64]
+  pixdim: [2.5, 2.5, 1]
