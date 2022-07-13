@@ -118,6 +118,8 @@ def obtain_longitudinal_translation_params(
         2, transform_list[np.argmax(correlations_history)]
     )
     if DEBUG_PLOT:
+        print(YS,YT,YS-YT,transform_list)
+        [print(index[-1],corr) for index,corr in zip(transform_list,correlations_history)] 
         template_matching_utils.debug_plot(image,template_img,
         optimal_translation_param,transform_list,correlations_history)
     return optimal_translation_param
