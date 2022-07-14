@@ -26,6 +26,7 @@ def RegionExtractByTemplateMatching(image: sitk.Image, template_img: sitk.Image)
 def preprocess(
     image: sitk.Image,
     template_img: sitk.Image,
+    CANONICAL_ORIENTATION='RAI'
 ):
     """bring the template image into same physical space and orientation as the source image
 
@@ -46,7 +47,6 @@ def preprocess(
     template_img.SetOrigin(new_origin)
 
     # change template orientation
-    CANONICAL_ORIENTATION = 'RAI'
     image = sitk.DICOMOrient(image,CANONICAL_ORIENTATION)
     template_img = sitk.DICOMOrient(template_img, CANONICAL_ORIENTATION)
 
@@ -69,8 +69,8 @@ def obtain_longitudinal_translation_params(
     """return translation transformation parameters
 
     Args:
-        image (sitk.Image): _description_
-        template_img (sitk.Image): _description_
+        image (sitk.Image): either a AXIAL or SAGITTAL slice
+        template_img (sitk.Image): same
         GRID_SAMPLING (int): step size in pixel units for the sliding window shift along longitudinal dimension
     """
     assert (
@@ -108,8 +108,11 @@ def obtain_longitudinal_translation_params(
     # YS is the longitudinal dimension of image
     # YT is the longitudinal dimension of template
     # we traverse in step size GRID_SAMPLING from 0 to YS(minus the template height)
+    
+    # generate a grid of transformations
     transform_list = [(0, index) for index in range(0, YS - YT, GRID_SAMPLING)]
     correlations_history = []
+    # obtain correlation metric for each transform
     for translation_param in transform_list:
         R.SetInitialTransform(sitk.TranslationTransform(2, translation_param))
         metric = -R.MetricEvaluate(image, template_img)
@@ -118,9 +121,12 @@ def obtain_longitudinal_translation_params(
         2, transform_list[np.argmax(correlations_history)]
     )
     if DEBUG_PLOT:
+        # plot the template image and the target image along with the bounding box depicting
+        # the location of template image in the target image
+        # also plot correlation metric for each transformation
         print(YS,YT,YS-YT,transform_list)
         [print(index[-1],corr) for index,corr in zip(transform_list,correlations_history)] 
-        template_matching_utils.debug_plot(image,template_img,
+        template_matching_utils.debug_plot_template_matching(image,template_img,
         optimal_translation_param,transform_list,correlations_history)
     return optimal_translation_param
 
