@@ -1,5 +1,6 @@
 import math
 import os
+import torch
 from glob import glob
 from typing import List, Literal, Optional, Tuple, Union
 
@@ -21,6 +22,9 @@ from torch.utils.data import ConcatDataset
 
 from custom_transforms import SimulateLowResolution
 
+from BaseSeg.data.dataset import DataLoaderX, SegDataSet
+from FlareSeg.coarse_base_seg.run import get_configs
+
 TupleStr = Union[Tuple[str, str], str]
 
 
@@ -37,6 +41,7 @@ class BaseDataModule(pl.LightningDataModule):
         val_ratio: float = 0.2,
         do_semi: bool = False,
         semi_mu: Optional[int] = None,
+        num_labels_with_bg: int = 14,
         crop_num_samples: int = 4,
         batch_size: int = 16,
         ds_cache_type: Optional[Literal["mem", "disk"]] = None,
@@ -48,66 +53,80 @@ class BaseDataModule(pl.LightningDataModule):
         super().__init__()
         self.save_hyperparameters()
 
-        self.num_workers = min(os.cpu_count(), max_workers)
+        # self.num_workers = min(os.cpu_count(), max_workers)
 
         self.cache_dir = (
             f"{os.path.basename(supervised_dir)}_"
             f"{self.__class__.__name__}_datacache"
         )
+        self.cfg = get_configs()
+        self.num_worker = self.cfg.DATA_LOADER.NUM_WORKER
+        if self.cfg.DATA_LOADER.NUM_WORKER <= self.cfg.DATA_LOADER.BATCH_SIZE + 2:
+            self.num_worker = self.cfg.DATA_LOADER.BATCH_SIZE + 2
 
     def setup(self, stage: Optional[str] = None):
         if stage is None or stage == "fit" or stage == "validate":
-            from sklearn.model_selection import train_test_split
+            # from sklearn.model_selection import train_test_split
 
-            image_paths = self.get_supervised_image_paths("images")
-            label_paths = self.get_supervised_image_paths("labels")
+            # image_paths = self.get_supervised_image_paths("images")
+            # label_paths = self.get_supervised_image_paths("labels")
 
-            data_dicts = tuple(
-                {"image": img, "label": lab}
-                for img, lab in zip(image_paths, label_paths)
-            )
+            # data_dicts = tuple(
+            #     {"image": img, "label": lab}
+            #     for img, lab in zip(image_paths, label_paths)
+            # )
 
-            train_files: List[dict]
-            val_files: List[dict]
+            # train_files: List[dict]
+            # val_files: List[dict]
 
-            train_files, val_files = train_test_split(
-                data_dicts, test_size=self.hparams.val_ratio
-            )
+            # train_files, val_files = train_test_split(
+            #     data_dicts, test_size=self.hparams.val_ratio
+            # )
 
             if stage != "validate":
-                train_transforms = self.get_transform(do_random=True)
-                self.train_ds = self.get_dataset(train_files, train_transforms)
+                # train_transforms = self.get_transform(do_random=True)
+                self.train_ds = self.get_dataset(stage=stage)
 
-                if self.hparams.do_semi:
-                    unlabeled_image_paths = glob(
-                        os.path.join(self.hparams.semisupervised_dir, "*.nii.gz")
-                    )
-                    if isinstance(self.hparams.semi_mu, int):
-                        # Sort by file size
-                        unlabeled_image_paths.sort(key=lambda img: os.stat(img).st_size)
+                # if self.hparams.do_semi:
+                #     unlabeled_image_paths = glob(
+                #         os.path.join(self.hparams.semisupervised_dir, "*.nii.gz")
+                #     )
+                #     if isinstance(self.hparams.semi_mu, int):
+                #         # Sort by file size
+                #         unlabeled_image_paths.sort(key=lambda img: os.stat(img).st_size)
 
-                        # Take only those images with smallest sizes
-                        unlabeled_image_paths = unlabeled_image_paths[
-                            : len(train_files) * self.hparams.semi_mu
-                        ]
+                #         # Take only those images with smallest sizes
+                #         unlabeled_image_paths = unlabeled_image_paths[
+                #             : len(train_files) * self.hparams.semi_mu
+                #         ]
 
-                    unlabeled_files = tuple(
-                        {"image": img} for img in unlabeled_image_paths
-                    )
+                #     # unlabeled_files = tuple(
+                #     #     {"image": img} for img in unlabeled_image_paths
+                #     # )
 
-                    unlabeled_transform = self.get_transform(
-                        keys="image", do_random=True
-                    )
+                #     # unlabeled_transform = self.get_transform(
+                #     #     keys="image", do_random=True
+                #     # )
 
-                    unlabeled_ds = self.get_dataset(
-                        unlabeled_files, unlabeled_transform
-                    )
+                #     unlabeled_ds = self.get_dataset(stage=stage)
 
-                    self.train_ds = ConcatDataset((self.train_ds, unlabeled_ds))
+                #     self.train_ds = ConcatDataset((self.train_ds, unlabeled_ds))
 
-            val_transforms = self.get_transform()
+            # val_transforms = self.get_transform()
 
-            self.val_ds = self.get_dataset(val_files, val_transforms)
+            self.val_ds = self.get_dataset(stage=stage)
+            # if self.is_distributed_train:
+            #     self.train_sampler = torch.utils.data.distributed.DistributedSampler(
+            #         self.train_ds
+            #     )
+            #     self.val_sampler = torch.utils.data.distributed.DistributedSampler(
+            #         self.val_ds
+            #     )
+            # else:
+            #     self.train_sampler = None
+            #     self.val_sampler = None
+            self.train_sampler = None
+            self.val_sampler = None
 
         if stage is None or stage == "predict":
             from saver import NiftiSaver
@@ -145,23 +164,41 @@ class BaseDataModule(pl.LightningDataModule):
         # )
 
     def train_dataloader(self):
-        return DataLoader(
-            self.train_ds,
-            batch_size=math.ceil(
-                self.hparams.batch_size / self.hparams.crop_num_samples
-            ),
-            num_workers=self.num_workers,
-            shuffle=True,
+        return DataLoaderX(
+            dataset=self.train_ds,
+            batch_size=self.cfg.DATA_LOADER.BATCH_SIZE,
+            num_workers=self.num_worker,
+            shuffle=True if self.train_sampler is None else False,
+            drop_last=False,
             pin_memory=self.hparams.pin_memory,
+            sampler=self.train_sampler,
         )
+        # return DataLoader(
+        #     self.train_ds,
+        #     batch_size=math.ceil(
+        #         self.hparams.batch_size / self.hparams.crop_num_samples
+        #     ),
+        #     num_workers=self.num_workers,
+        #     shuffle=True,
+        #     pin_memory=self.hparams.pin_memory,
+        # )
 
     def val_dataloader(self):
-        return DataLoader(
-            self.val_ds,
-            batch_size=1,  # Because the images do not align and are not cropped
-            num_workers=self.num_workers,
+        return DataLoaderX(
+            dataset=self.val_ds,
+            batch_size=self.cfg.DATA_LOADER.BATCH_SIZE,
+            num_workers=self.num_worker,
+            shuffle=False,
+            drop_last=False,
             pin_memory=self.hparams.pin_memory,
+            sampler=self.val_sampler,
         )
+        # return DataLoader(
+        #     self.val_ds,
+        #     batch_size=1,  # Because the images do not align and are not cropped
+        #     num_workers=self.num_workers,
+        #     pin_memory=self.hparams.pin_memory,
+        # )
 
     def predict_dataloader(self):
         return DataLoader(
@@ -231,13 +268,5 @@ class BaseDataModule(pl.LightningDataModule):
             )
         )
 
-    def get_dataset(self, *dataset_args):
-        if self.hparams.ds_cache_type == "mem":
-            return CacheDataset(*dataset_args, num_workers=self.num_workers)
-        elif self.hparams.ds_cache_type == "disk":
-            return PersistentDataset(
-                *dataset_args,
-                cache_dir=self.cache_dir,
-                pickle_protocol=5,
-            )
-        return Dataset(*dataset_args)
+    def get_dataset(self, stage="train"):
+        return SegDataSet(self.cfg, stage)

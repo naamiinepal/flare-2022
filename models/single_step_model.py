@@ -11,7 +11,7 @@ class SingleStepModel(SingleBaseModel):
         super().__init__(**kwargs)
 
     def training_step(self, batch: dict, batch_idx):
-        image = batch["image"]
+        image = batch[0]
         output: torch.Tensor = self(image)
 
         common_logger_kwargs = {
@@ -19,7 +19,7 @@ class SingleStepModel(SingleBaseModel):
             "batch_size": image.size(0),
         }
 
-        label = batch.get("label")
+        label = batch[1]  # NOTE: Change for semi-supervised
 
         if self.dm_hparams.do_semi:
             progbar_logger_kwargs = {**common_logger_kwargs, "prog_bar": True}

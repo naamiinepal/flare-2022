@@ -12,10 +12,11 @@ base_model = UNet(
     act="relu",
 )
 
-checkpoint_path = "checkpoints/coarse/unet-l5-s16-64-customresize-semi-kernel-553/epoch=36-val/loss=0.12.ckpt"
+checkpoint_path = "checkpoints/coarse/unet-l5-s16-64-customresize-semi-kernel-553/epoch=11-val/loss=0.1016.ckpt"
 
 model = CoarseModel.load_from_checkpoint(
     checkpoint_path, model=base_model, model_weights_path=None
 )
 
-model.save_model("coarse_unscripted.pt")
+model.save_model("coarse_boundingmask_semi_unscripted.pt")
+# model.save_scripted("coarse_boundingmask_semi.ts")

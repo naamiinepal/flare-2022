@@ -1,7 +1,5 @@
 import gc
 import math
-
-# import itk
 import os.path
 from argparse import ArgumentParser, Namespace
 from glob import glob
@@ -18,7 +16,6 @@ from monai.transforms import (
     Orientationd,
     ToTensord,
 )
-from monai.data.box_utils import convert_box_mode
 from torch.nn import functional as F
 
 from custom_transforms import CustomResize, CustomResized
@@ -30,59 +27,8 @@ coarse_roi_size = (128, 128, 64)
 fine_roi_size = (192, 192, 96)
 coarse_scale = np.asarray(intermediate_roi_size) / np.asarray(coarse_roi_size)
 inverse_coarse_scale = tuple(1 / coarse_scale)
-min_abdomen_size_mm = (125, 125, 320)  # in mm
 
 resize_fine = CustomResize(roi_size=fine_roi_size, image_only=True)
-
-
-# size_dir = "/mnt/HDD2/flare2022/abdomen_size_data"
-
-
-# def save_nifti_from_array(img_array, filename):
-#     filename = os.path.join(size_dir, f"{filename}.nii.gz")
-#     itk_np_view = itk.image_view_from_array(img_array)
-#     itk.imwrite(itk_np_view, filename)
-
-
-def get_min_sized_abdomen(img_pix_dim, boxes_pix: torch.Tensor):
-    """
-    Returns the bounding box of the minimum sized abdomen in pixels.
-    Extracts the physical size of the abdomen from the given bounding box.
-    If the abdomen is too small, expands the bounding box to the minimum size,
-    else does not change the bounding box.
-    This function does not change the original resolution of the image.
-    """
-    # print(img_pix_dim, "Old box", boxes_pix)
-    boxes_mm = torch.concat((boxes_pix[:3] * img_pix_dim, boxes_pix[3:] * img_pix_dim))
-
-    xcenter, ycenter, zcenter, xsize, ysize, zsize = convert_box_mode(
-        boxes_mm.unsqueeze(0), src_mode="xyzxyz", dst_mode="cccwhd"
-    ).squeeze(0)
-    xsize_min, ysize_min, zsize_min = np.maximum(
-        min_abdomen_size_mm, (xsize, ysize, zsize)
-    )
-    xmin, ymin, zmin, xmax, ymax, zmax = (
-        convert_box_mode(
-            torch.tensor(
-                [[xcenter, ycenter, zcenter, xsize_min, ysize_min, zsize_min]]
-            ),
-            src_mode="cccwhd",
-            dst_mode="xyzxyz",
-        )
-        .squeeze(0)
-        .numpy()
-    )
-
-    # convert back to pixel coordinates
-    x1 = math.floor(max(0, boxes_pix[0] - abs(xmin)) / img_pix_dim[0])
-    y1 = math.floor(max(0, boxes_pix[1] - abs(ymin)) / img_pix_dim[1])
-    z1 = math.floor(max(0, boxes_pix[2] - abs(zmin)) / img_pix_dim[2])
-    x2 = math.floor(xmax / img_pix_dim[0])
-    y2 = math.floor(ymax / img_pix_dim[1])
-    z2 = math.floor(zmax / img_pix_dim[2])
-
-    # print("New box: ", x1, y1, z1, x2, y2, z2)
-    return x1, y1, z1, x2, y2, z2
 
 
 def main(params: Namespace):
@@ -162,11 +108,6 @@ def main(params: Namespace):
 
     with torch.inference_mode():
         for batch in dl:
-            # filename = (
-            #     batch["image_meta_dict"]["filename_or_obj"][0]
-            #     .split("/")[-1]
-            #     .split(".")[0]
-            # )
             image = batch["image"].to(device)
             coarse_image = F.interpolate(
                 input=image,
@@ -197,20 +138,13 @@ def main(params: Namespace):
                 z1 = int(z_indices.min() * coarse_scale[2])
                 z2 = math.ceil(z_indices.max() * coarse_scale[2])
                 cropped_image = image[0, :, x1 : x2 + 1, y1 : y2 + 1, z1 : z2 + 1]
-                # save_nifti_from_array(cropped_image, f"{filename}_cropped")
-                # x1, y1, z1, x2, y2, z2 = get_min_sized_abdomen(
-                #     img_pix_dim=batch["image_meta_dict"]["pixdim"][0][1:4].numpy(),
-                #     boxes_pix=torch.tensor([x1, y1, z1, x2, y2, z2]),
-                # )
-                cropped_image = image[0, :, x1 : x2 + 1, y1 : y2 + 1, z1 : z2 + 1]
-                # save_nifti_from_array(cropped_image, f"{filename}_resized")
 
                 # Add batch to pass in the inferrer
                 fine_image = resize_fine(cropped_image).unsqueeze(0)
 
                 # (B, 14, H, W, D)
                 # Convert to float for interpolation
-                # Where to perfoc_outrm interpolation
+                # Where to perform interpolation
                 output = (
                     fine_sliding_inferer(fine_image, fine_model).argmax(
                         dim=1, keepdim=True
@@ -242,9 +176,7 @@ def main(params: Namespace):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--coarse_ckpt_path", default="coarse_flare_model.ts", type=str)
-    parser.add_argument(
-        "--fine_ckpt_path", default="fine_flare_model_for_paper.ts", type=str
-    )
+    parser.add_argument("--fine_ckpt_path", default="fine_flare_model.ts", type=str)
     parser.add_argument("--predict_dir", default="inputs", type=str)
     parser.add_argument("--output_dir", default="outputs", type=str)
     parser.add_argument("--sw_batch_size", default=2, type=int)

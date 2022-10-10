@@ -1,12 +1,16 @@
 import math
-from typing import Optional, Tuple
+import os
+from typing import Optional, Tuple, List
 
 import numpy as np
+from glob import glob
+from monai.data import Dataset
 from monai.transforms import (
     Compose,
     CropForegroundd,
     EnsureChannelFirstd,
-    HistogramNormalized,
+    # HistogramNormalized,
+    ScaleIntensityRanged,
     LoadImaged,
     Orientationd,
     RandRotated,
@@ -16,7 +20,9 @@ from monai.transforms import (
     ToTensord,
 )
 
+from torch.utils.data import ConcatDataset
 from custom_transforms import CustomResized
+
 
 from . import BaseDataModule, TupleStr
 
@@ -34,10 +40,88 @@ class C2FDataModule(BaseDataModule):
 
         self.save_hyperparameters()
 
+    def setup(self, stage: Optional[str] = None):
+        if stage is None or stage == "fit" or stage == "validate":
+            from sklearn.model_selection import train_test_split
+
+            image_paths = self.get_supervised_image_paths("images")
+            label_paths = self.get_supervised_image_paths("labels")
+
+            data_dicts = tuple(
+                {"image": img, "label": lab}
+                for img, lab in zip(image_paths, label_paths)
+            )
+
+            train_files: List[dict]
+            val_files: List[dict]
+
+            train_files, val_files = train_test_split(
+                data_dicts, test_size=self.hparams.val_ratio
+            )
+
+            if stage != "validate":
+                train_transforms = self.get_transform(do_random=True)
+                self.train_ds = self.get_dataset(train_files, train_transforms)
+
+                if self.hparams.do_semi:
+                    unlabeled_image_paths = glob(
+                        os.path.join(self.hparams.semisupervised_dir, "*.nii.gz")
+                    )
+                    if isinstance(self.hparams.semi_mu, int):
+                        # Sort by file size
+                        unlabeled_image_paths.sort(key=lambda img: os.stat(img).st_size)
+
+                        # Take only those images with smallest sizes
+                        unlabeled_image_paths = unlabeled_image_paths[
+                            : len(train_files) * self.hparams.semi_mu
+                        ]
+
+                    unlabeled_files = tuple(
+                        {"image": img} for img in unlabeled_image_paths
+                    )
+
+                    unlabeled_transform = self.get_transform(
+                        keys="image", do_random=True
+                    )
+
+                    unlabeled_ds = self.get_dataset(
+                        unlabeled_files, unlabeled_transform
+                    )
+
+                    self.train_ds = ConcatDataset((self.train_ds, unlabeled_ds))
+
+            val_transforms = self.get_transform(validate=True)
+
+            self.val_ds = self.get_dataset(val_files, val_transforms)
+
+        if stage is None or stage == "predict":
+            from saver import NiftiSaver
+
+            pred_image_paths = glob(os.path.join(self.hparams.predict_dir, "*.nii.gz"))
+            pred_image_paths.sort()
+
+            pred_dicts = tuple({"image": img} for img in pred_image_paths)
+
+            pred_transforms = self.get_transform(keys="image")
+
+            self.pred_ds = Dataset(pred_dicts, pred_transforms)
+
+            self.saver = NiftiSaver(
+                self.hparams.output_dir,
+                output_postfix="",
+                mode="nearest",
+                dtype=np.float32,
+                output_dtype=np.uint8,
+                separate_folder=False,
+                print_log=False,
+                channel_dim=0,
+            )
+
     def get_transform(
         self,
         keys: TupleStr = BaseDataModule._dict_keys,
         do_random: bool = False,
+        validate: bool = False,
     ):
         mode = "bilinear"
         additional_transforms = []
@@ -47,8 +131,13 @@ class C2FDataModule(BaseDataModule):
             mode = (mode, "nearest")
             zoom_mode = (zoom_mode, "nearest")
             # additional_transforms.append(CastToTyped(keys="label", dtype=np.uint8))
-            additional_transforms.append(CropForegroundd(keys=keys, source_key="label"))
-            roi_size = self.hparams.fine_roi_size
+            if validate:
+                roi_size = self.hparams.intermediate_roi_size
+            else:
+                additional_transforms.append(
+                    CropForegroundd(keys=keys, source_key="label")
+                )
+                roi_size = self.hparams.fine_roi_size
         else:
             roi_size = self.hparams.intermediate_roi_size
 
@@ -64,7 +153,10 @@ class C2FDataModule(BaseDataModule):
                 LoadImaged(reader="NibabelReader", keys=keys),
                 EnsureChannelFirstd(keys=keys),
                 Orientationd(keys=keys, axcodes="RAI"),
-                HistogramNormalized(keys="image", min=-1, max=1),
+                ScaleIntensityRanged(
+                    keys="image", a_min=-325, a_max=325, b_min=-1, b_max=1, clip=True
+                ),  # To imitate the previous winner's preprocessing
+                # HistogramNormalized(keys="image", min=-1, max=1),
                 *additional_transforms,
                 ToTensord(keys=keys),
             )

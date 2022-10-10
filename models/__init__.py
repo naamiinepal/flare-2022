@@ -207,8 +207,10 @@ class SingleBaseModel(BaseModel):
     def forward(self, image) -> torch.Tensor:
         return self.model(image)
 
-    def save_scripted(self, path: str):
-        torch.jit.script(self.model).save(path)
+    def save_scripted(self, path: str, use_gpu: bool = True):
+        device = "cuda" if use_gpu else "cpu"
+        model = self.model.eval().to(device)
+        torch.jit.script(model).save(path)
 
     def save_model(self, path: str):
         torch.save(self.model.state_dict(), path, pickle_protocol=5)

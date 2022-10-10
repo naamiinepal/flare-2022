@@ -47,7 +47,7 @@ model:
     output_threshold: 0.5
     pseudo_threshold: 0.45 # Distance from 0.5 for binary
     unsup_weight: 0.005
-    learning_rate: 0.01
+    learning_rate: 0.005
     sw_batch_size: 4
     sw_overlap: 0.25
     sw_mode: gaussian

@@ -1,11 +1,13 @@
 import math
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from monai.transforms import AsDiscrete, KeepLargestConnectedComponent
 from torch import Tensor, nn
+from monai.data.box_utils import convert_box_mode
+
 
 from . import BaseModel
 
@@ -17,6 +19,7 @@ class C2FSegmentor(BaseModel):
         fine_model: nn.Module,
         coarse_weights_path: Optional[str] = None,
         fine_weights_path: Optional[str] = None,
+        min_abdomen_size_mm: Optional[Tuple[int, int, int]] = (368, 231, 281),
         **kwargs,
     ):
         self.save_hyperparameters(
@@ -48,8 +51,14 @@ class C2FSegmentor(BaseModel):
         self.coarse_model = coarse_model.eval()
         self.fine_model = fine_model
 
+        # To get the spacings of images in each batch in forward pass
+        self.pix_dims = torch.tensor([])
+
     def forward(self, image) -> torch.Tensor:
-        cropped_images, cropped_indices = self.cropped_image_indices(image)
+        # pix_dims = self.pix_dims[-self.dm_hparams.batch_size:]
+        cropped_images, cropped_indices = self.cropped_image_indices(
+            image, self.pix_dims
+        )
         scaled_output = []
         if len(cropped_images):
             # (B, 1, H, W, D)
@@ -81,15 +90,58 @@ class C2FSegmentor(BaseModel):
             final_output[i][:, x1 : x2 + 1, y1 : y2 + 1, z1 : z2 + 1] = scaled_out
         return final_output
 
+    def get_min_sized_abdomen(self, img_pix_dim, boxes_pix: torch.Tensor):
+        """
+        Returns the bounding box of the minimum sized abdomen in pixels.
+        Extracts the physical size of the abdomen from the given bounding box.
+        If the abdomen is too small, expands the bounding box to the minimum size,
+        else does not change the bounding box.
+        This function does not change the original resolution of the image.
+        """
+        # print(img_pix_dim, "Old box", boxes_pix)
+        boxes_mm = torch.concat(
+            (boxes_pix[:3] * img_pix_dim, boxes_pix[3:] * img_pix_dim)
+        )
+
+        xcenter, ycenter, zcenter, xsize, ysize, zsize = convert_box_mode(
+            boxes_mm.unsqueeze(0), src_mode="xyzxyz", dst_mode="cccwhd"
+        ).squeeze(0)
+        xsize_min, ysize_min, zsize_min = np.maximum(
+            self.hparams.min_abdomen_size_mm, (xsize, ysize, zsize)
+        )
+        xmin, ymin, zmin, xmax, ymax, zmax = (
+            convert_box_mode(
+                torch.tensor(
+                    [[xcenter, ycenter, zcenter, xsize_min, ysize_min, zsize_min]]
+                ),
+                src_mode="cccwhd",
+                dst_mode="xyzxyz",
+            )
+            .squeeze(0)
+            .numpy()
+        )
+
+        # convert back to pixel coordinates
+        x1 = math.floor(max(0, boxes_pix[0] - abs(xmin)) / img_pix_dim[0])
+        y1 = math.floor(max(0, boxes_pix[1] - abs(ymin)) / img_pix_dim[1])
+        z1 = math.floor(max(0, boxes_pix[2] - abs(zmin)) / img_pix_dim[2])
+        x2 = math.floor(xmax / img_pix_dim[0])
+        y2 = math.floor(ymax / img_pix_dim[1])
+        z2 = math.floor(zmax / img_pix_dim[2])
+
+        # print("New box: ", x1, y1, z1, x2, y2, z2)
+        return x1, y1, z1, x2, y2, z2
+
     @torch.inference_mode()
-    def cropped_image_indices(self, image: Tensor):
+    def cropped_image_indices(self, image: Tensor, pix_dims: Tensor):
+        # print("Pixdims", pix_dims)
         coarse_image = self.resize_coarse(image)
         coarse_output = self.coarse_model(coarse_image).cpu() >= 0.5
         cropped_images = []
         cropped_indices = []
         has_mask = coarse_output.any()
         if has_mask:
-            for c_out, img in zip(coarse_output, image):
+            for c_out, img, pix_dim in zip(coarse_output, image, pix_dims):
                 if self.hparams.do_post_process:
                     c_out = self.keep_connected_component_coarse(c_out)
                 c_out = c_out.squeeze(0)
@@ -102,6 +154,11 @@ class C2FSegmentor(BaseModel):
                 y2 = math.ceil(y_indices.max() * self.coarse_scale[1])
                 z1 = int(z_indices.min() * self.coarse_scale[2])
                 z2 = math.ceil(z_indices.max() * self.coarse_scale[2])
+                # print("Here")
+                # x1, y1, z1, x2, y2, z2 = self.get_min_sized_abdomen(
+                #     img_pix_dim=torch.tensor(pix_dim).cpu(),
+                #     boxes_pix=torch.tensor([x1, y1, z1, x2, y2, z2]).cpu(),
+                # )
                 cropped_indices.append((x1, x2, y1, y2, z1, z2))
                 cropped_images.append(img[:, x1 : x2 + 1, y1 : y2 + 1, z1 : z2 + 1])
         return cropped_images, cropped_indices
@@ -113,6 +170,9 @@ class C2FSegmentor(BaseModel):
 
     def training_step(self, batch: dict, batch_idx):
         image = batch["image"]
+        # print(batch['image_meta_dict']['pixdim'])
+        self.pix_dims = batch["image_meta_dict"]["pixdim"][:, 1:4]
+        # print("Pix dim", self.pix_dims)
 
         common_logger_kwargs = {
             "on_epoch": True,
@@ -193,8 +253,9 @@ class C2FSegmentor(BaseModel):
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         label = batch["label"]
         image = batch["image"]
+        self.pix_dims = batch["image_meta_dict"]["pixdim"][:, 1:4]
 
-        output = self.sliding_inferer(image, self.fine_model)
+        output = self.sliding_inferer(image, self)
 
         if not self.trainer.fast_dev_run and self.logger is not None and batch_idx == 0:
             self.plot_image(torch.argmax(output, dim=1, keepdim=True), tag="pred")
@@ -222,6 +283,24 @@ class C2FSegmentor(BaseModel):
         #     argmax_out = out.argmax(dim=0)
         #     meta_data = {k: v[i] for k, v in batch_meta_data.items()}
         #     self.saver(argmax_out, meta_data)
+
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
+        image = batch["image"]
+        self.pix_dims = batch["image_meta_dict"]["pixdim"][:, 1:4]
+
+        output = self.sliding_inferer(image, self)
+
+        batch_meta_data = {
+            k: v.cpu() if isinstance(v, torch.Tensor) else v
+            for k, v in batch["image_meta_dict"].items()
+        }
+
+        for i, out in enumerate(output):
+            if self.hparams.do_post_process:
+                out = self.keep_connected_component(self.post_pred(out))
+            argmax_out = out.argmax(dim=0, keepdim=True)
+            meta_data = {k: v[i] for k, v in batch_meta_data.items()}
+            self.saver(argmax_out, meta_data)
 
     def resize_coarse(self, img_batch: torch.Tensor) -> torch.Tensor:
         return F.interpolate(
