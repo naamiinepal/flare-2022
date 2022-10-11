@@ -58,7 +58,7 @@ model:
     do_post_process: false
     connectivity: null
 data:
-  class_path: datamodules.coarse_datamodule.CoarseDataModule
+  class_path: datamodules.single_step_datamodule.SingleStepDataModule
   init_args:
     supervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50
     semisupervised_dir: /mnt/HDD2/flare2022/datasets/FLARE2022/Training/Unlabeled
@@ -70,7 +70,7 @@ data:
     ds_cache_type: mem
     max_workers: 4
     roi_size: [128, 128, 64]
-    transform: boundingmask
+    # transform: boundingmask
     num_labels_with_bg: 14
 
 
