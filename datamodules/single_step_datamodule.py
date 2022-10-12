@@ -31,12 +31,12 @@ class SingleStepDataModule(BaseDataModule):
         do_random: bool = False,
     ):
         mode = "bilinear"
-        additional_transforms = []
         zoom_mode = "trilinear"
         if not isinstance(keys, str):
             mode = (mode, "nearest")
             zoom_mode = (zoom_mode, "nearest")
 
+        additional_transforms = []
         if do_random:
             additional_transforms.extend(self.get_weak_aug(keys, mode, zoom_mode))
 
@@ -44,7 +44,7 @@ class SingleStepDataModule(BaseDataModule):
             (
                 LoadImaged(reader="NibabelReader", keys=keys),
                 EnsureChannelFirstd(keys=keys),
-                Orientationd(keys, axcodes="RAI"),
+                Orientationd(keys, axcodes="LPS"),
                 CustomResized(
                     keys=keys,
                     roi_size=self.hparams.roi_size,

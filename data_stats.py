@@ -1,35 +1,46 @@
-from monai.data import DatasetSummary
+from glob import glob
+import os
+import nibabel as nib
+import numpy as np
 
-from datamodules.single_step_datamodule import SingleStepDataModule
+base_dir = "/mnt/HDD2/flare2022/datasets/FLARE2022/Training/Unlabeled"
 
-dm = SingleStepDataModule(
-    num_labels_with_bg=14,
-    supervised_dir="/mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50",
-    predict_dir="/mnt/HDD2/flare2022/datasets/FLARE2022/Training/FLARE22_LabeledCase50/images",
-    val_ratio=0.2,
-    max_workers=4,
-    crop_num_samples=4,
-    batch_size=8,
-    ds_cache_type=None,
-    pixdim=(2.5, 2.5, 2.5),
-    roi_size=(128, 128, 64),
+
+def get_image_paths(baseDir: str):
+    image_paths = glob(os.path.join(baseDir, "*.nii.gz"))
+    image_paths.sort()
+    return image_paths
+
+
+image_paths = get_image_paths(base_dir)
+assert len(image_paths), "No data found"
+
+voxel_spacing_max, voxel_spacing_min = np.array((0.0, 0.0, 0.0)), np.array(
+    (100.0, 100.0, 100.0)
 )
 
-dm.setup("predict")
+spatial_size_max, spatial_size_min = np.array((0.0, 0.0, 0.0)), np.array(
+    (10000.0, 10000.0, 10000.0)
+)
 
-# first_train = dm.train_ds[0]
-# first_val = dm.val_ds[0]
+for image_path in image_paths:
+    img = nib.load(image_path)
+    spacing = img.header.get_zooms()[:3]
+    size = img.shape
+    print(image_path.split("/")[-1], spacing, size)
+    spatial_size_max = np.maximum(spatial_size_max, size)
+    spatial_size_min = np.minimum(spatial_size_min, size)
+    voxel_spacing_min = np.minimum(voxel_spacing_min, spacing)
+    voxel_spacing_max = np.maximum(voxel_spacing_max, spacing)
 
-ds = dm.pred_ds
 
-assert len(ds), "No data found"
+print("Voxel Spacing Min", voxel_spacing_min)
+print("Voxel Spacing Max", voxel_spacing_max)
 
-dsum = DatasetSummary(ds, num_workers=dm.num_workers)
+print("Spatial Size Min", spatial_size_min)
+print("Spatial Size Max", spatial_size_max)
+# spacing = dsum.get_target_spacing(anisotropic_threshold=9999999999)
 
-print("Predict Dir", dm.hparams.predict_dir)
-
-spacing = dsum.get_target_spacing(anisotropic_threshold=9999999999)
-
-print(spacing)
+# print(spacing)
 
 # (0.7958985, 0.7958985, 2.5)

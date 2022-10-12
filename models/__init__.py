@@ -62,12 +62,14 @@ class BaseModel(pl.LightningModule):
             )
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
-        label = batch["label"]
-        image = batch["image"]
+        image = batch[0]
+        label = batch[1]
 
-        output = self.sliding_inferer(image, self)
+        output = self(image)
 
-        if self.logger is not None and batch_idx == 0:
+        # output = self.sliding_inferer(image, self)
+
+        if not self.trainer.fast_dev_run and self.logger is not None and batch_idx == 0:
             self.plot_image(torch.argmax(output, dim=1, keepdim=True), tag="pred")
 
             # Plot label only once
@@ -126,13 +128,20 @@ class BaseModel(pl.LightningModule):
     def compute_dice_score(
         self, output: Iterable[torch.Tensor], label: Iterable[torch.Tensor]
     ):
-        post_output = self.post_pred(output.squeeze(0))
-        if self.hparams.do_post_process:
-            post_output = self.keep_connected_component(post_output)
+        post_output = torch.empty_like(output)
 
-        post_label = self.post_label(label.squeeze(0)).unsqueeze(0)
+        # Post labels will be one-hot encoded, like output
+        post_label = torch.empty_like(output)
 
-        self.val_dice_metric(post_output.unsqueeze(0), post_label)
+        for i, (out, lab) in enumerate(zip(output, label)):
+            post_out = self.post_pred(out)
+            if self.hparams.do_post_process:
+                post_out = self.keep_connected_component(post_out)
+
+            post_output[i] = post_out
+            post_label[i] = self.post_label(lab)
+
+        self.val_dice_metric(post_output, post_label)
 
     def configure_optimizers(self):
         # optimizer = torch.optim.SGD(

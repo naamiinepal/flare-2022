@@ -226,3 +226,5 @@ checkpoints
 *.gz
 *.pt
 *logs
+*.ts
+*.out

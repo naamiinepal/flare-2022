@@ -5,51 +5,63 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name":"Debug Fitting",
-            "type":"python",
-            "request":"launch",
-            "program":"trainer.py",
+            "name": "Python: Create FlareSeg Dataset",
+            "type": "python",
+            "request": "launch",
+            "module": "FlareSeg.data_prepare.run",
+            "justMyCode": false
+        },
+        {
+            "name": "Debug Coarse",
+            "type": "python",
+            "request": "launch",
+            "program": "trainer.py",
             "args": [
                 "fit",
                 "--config",
-                "configs/flare/coarse/version1.yaml"
+                "configs/flare/flare21/abdomen_extractor/trialrun1.yaml"
             ],
             "env": {
                 "CUDA_LAUNCH_BLOCKING": "1"
             },
-            "justMyCode":false
+            "justMyCode": false
         },
         {
-            "name":"Debug Fine Model",
+            "name": "Debug Fine Model",
             "type": "python",
-            "request":"launch",
-            "program":"c2f_trainer.py",
+            "request": "launch",
+            "program": "c2f_trainer.py",
             "args": [
-                "predict",
+                "validate",
                 "--config",
-                "configs/flare/c2f/version6.yaml"
+                "configs/flare/c2f/version9.yaml"
             ],
             "env": {
                 "CUDA_LAUNCH_BLOCKING": "1"
             },
-            "justMyCode":false
+            "justMyCode": false
         },
         {
-            "name":"Debug Submission",
+            "name": "Debug Submission",
             "type": "python",
-            "request":"launch",
-            "program":"predict_c2f_scratch.py",
+            "request": "launch",
+            "program": "predict_c2f_scratch.py",
             "args": [
-                "--predict_dir","datasets/FLARE2022/Validation/",
-                "--output_dir","/home/safal/output",
-                "--sw_batch_size","4",
-                "--num_workers","4",
-                "--post_process","true"
+                "--predict_dir",
+                "datasets/FLARE2022/Validation/",
+                "--output_dir",
+                "/home/safal/output",
+                "--sw_batch_size",
+                "4",
+                "--num_workers",
+                "4",
+                "--post_process",
+                "true"
             ],
             "env": {
                 "CUDA_LAUNCH_BLOCKING": "1"
             },
-            "justMyCode":false
+            "justMyCode": false
         },
         {
             "name": "Python: Current File",

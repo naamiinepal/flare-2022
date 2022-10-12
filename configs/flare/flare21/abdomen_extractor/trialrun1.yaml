@@ -1,10 +1,9 @@
 seed_everything: 42
 trainer:
-  fast_dev_run: True
-  logger: 
+  logger:
       class_path: pytorch_lightning.loggers.TensorBoardLogger
       init_args:
-          save_dir: flare21/abdomen_extractor
+          save_dir: flare21_logs/abdomen_extractor
           name: flare_21_abdomen_extractor/run1
           log_graph: True
           default_hp_metric: False
@@ -26,9 +25,10 @@ trainer:
   devices: [0] # None can not be returned in multiple GPUs
   max_epochs: 200
   accelerator: "gpu"
-  log_every_n_steps: 256
-  accumulate_grad_batches: 128 # Actual batch size
-  val_check_interval: 0.5
+  log_every_n_steps: 1
+  # fast_dev_run: True
+  # accumulate_grad_batches: 128 # Actual batch size
+  # val_check_interval: 0.5
 ckpt_path: null
 model:
   class_path: models.single_step_model.SingleStepModel
@@ -38,11 +38,11 @@ model:
       init_args:
         spatial_dims: 3
         in_channels: 1
-        out_channels: 1
+        out_channels: ${data.init_args.num_labels_with_bg}
         kernel_size: [5, 5, 3]
         up_kernel_size: [5, 5, 3]
         channels: [16, 16, 32, 32]
-        strides: [2, 2, 2, 2]
+        strides: [2, 2, 2]
         act: relu
     model_weights_path: null
     # output_threshold: 0.5
@@ -124,4 +124,3 @@ data:
 #     IS_POSTPROCESS: False
 #     IS_DYNAMIC_EMPTY_CACHE: False
 #     WEIGHT_DIR: None
-

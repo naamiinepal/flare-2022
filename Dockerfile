@@ -9,7 +9,8 @@ COPY docker_requirements.txt requirements.txt
 RUN pip install --no-cache-dir -qr requirements.txt
 
 # Copy Codes
-COPY predict_c2f_scratch.py saver.py predict.sh custom_transforms.py ./
+COPY __init__.py predict_c2f_scratch.py saver.py predict.sh ./
+COPY ./custom_transforms /workspace/custom_transforms
 
 # Copy checkpoints
-COPY coarse_flare_model.ts fine_flare_model.ts ./
+COPY coarse_boundingmask_semi.ts fine_flare_model_final.ts ./

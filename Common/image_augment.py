@@ -33,7 +33,9 @@ class DataAugmentor(object):
 
         return npy_image
 
-    def random_rotate(self, npy_image, npy_label=None, min_angle=-5, max_angle=5, axes=None):
+    def random_rotate(
+        self, npy_image, npy_label=None, min_angle=-5, max_angle=5, axes=None
+    ):
         """
         Random rotate image in one axes, which is selected randomly or passed in, as well as mask.
         """
@@ -74,14 +76,22 @@ class DataAugmentor(object):
 
     @staticmethod
     def random_zoom(npy_image, npy_label=None, min_percentage=0.8, max_percentage=1.2):
-        zoom_factor = np.random.random() * (max_percentage - min_percentage) + min_percentage
-        zoom_matrix = np.array([[zoom_factor, 0, 0, 0],
-                                [0, zoom_factor, 0, 0],
-                                [0, 0, zoom_factor, 0],
-                                [0, 0, 0, 1]])
+        zoom_factor = (
+            np.random.random() * (max_percentage - min_percentage) + min_percentage
+        )
+        zoom_matrix = np.array(
+            [
+                [zoom_factor, 0, 0, 0],
+                [0, zoom_factor, 0, 0],
+                [0, 0, zoom_factor, 0],
+                [0, 0, 0, 1],
+            ]
+        )
 
         if npy_label is not None:
-            return nd.affine_transform(npy_image, zoom_matrix), nd.affine_transform(npy_label, zoom_matrix)
+            return nd.affine_transform(npy_image, zoom_matrix), nd.affine_transform(
+                npy_label, zoom_matrix
+            )
 
         return nd.affine_transform(npy_image, zoom_matrix)
 
@@ -97,18 +107,21 @@ class DataAugmentor(object):
         shift_y = np.random.randint(-distance_y, distance_y)
         shift_x = np.random.randint(-distance_x, distance_x)
 
-        offset_matrix = np.array([[1, 0, 0, shift_z],
-                                  [0, 1, 0, shift_y],
-                                  [0, 0, 1, shift_x],
-                                  [0, 0, 0, 1]])
+        offset_matrix = np.array(
+            [[1, 0, 0, shift_z], [0, 1, 0, shift_y], [0, 0, 1, shift_x], [0, 0, 0, 1]]
+        )
 
         if npy_mask is not None:
-            return nd.affine_transform(npy_image, offset_matrix), nd.affine_transform(npy_mask, offset_matrix)
+            return nd.affine_transform(npy_image, offset_matrix), nd.affine_transform(
+                npy_mask, offset_matrix
+            )
 
         return nd.affine_transform(npy_image, offset_matrix)
 
     @staticmethod
-    def elastic_transform_3d(npy_image, npy_label=None, alpha=1, sigma=20, bg_val=0.0, method="linear"):
+    def elastic_transform_3d(
+        npy_image, npy_label=None, alpha=1, sigma=20, bg_val=0.0, method="linear"
+    ):
         """
         Elastic deformation of images as described in [Simard2003]_.
         [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
@@ -128,28 +141,46 @@ class DataAugmentor(object):
         coords = np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2])
 
         # Initialize interpolators
-        im_intrps = RegularGridInterpolator(coords, npy_image, method=method, bounds_error=False, fill_value=bg_val)
+        im_intrps = RegularGridInterpolator(
+            coords, npy_image, method=method, bounds_error=False, fill_value=bg_val
+        )
 
         # Get random elastic deformations
-        dz = gaussian_filter((np.random.rand(*shape) * 2 - 1), sigma,
-                             mode="constant", cval=0.) * alpha
-        dy = gaussian_filter((np.random.rand(*shape) * 2 - 1), sigma,
-                             mode="constant", cval=0.) * alpha
-        dx = gaussian_filter((np.random.rand(*shape) * 2 - 1), sigma,
-                             mode="constant", cval=0.) * alpha
+        dz = (
+            gaussian_filter(
+                (np.random.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0.0
+            )
+            * alpha
+        )
+        dy = (
+            gaussian_filter(
+                (np.random.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0.0
+            )
+            * alpha
+        )
+        dx = (
+            gaussian_filter(
+                (np.random.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0.0
+            )
+            * alpha
+        )
 
         # Define sample points
-        z, y, x = np.mgrid[0:shape[0], 0:shape[1], 0:shape[2]]
-        indices = np.reshape(z + dz, (-1, 1)), \
-                  np.reshape(y + dy, (-1, 1)), \
-                  np.reshape(x + dx, (-1, 1))
+        z, y, x = np.mgrid[0 : shape[0], 0 : shape[1], 0 : shape[2]]
+        indices = (
+            np.reshape(z + dz, (-1, 1)),
+            np.reshape(y + dy, (-1, 1)),
+            np.reshape(x + dx, (-1, 1)),
+        )
 
         # Interpolate 3D image
         npy_image = im_intrps(indices).reshape(shape)
 
         # Interpolate labels
         if npy_label is not None:
-            lab_intrp = RegularGridInterpolator(coords, npy_label, method="nearest", bounds_error=False, fill_value=0)
+            lab_intrp = RegularGridInterpolator(
+                coords, npy_label, method="nearest", bounds_error=False, fill_value=0
+            )
             npy_label = lab_intrp(indices).reshape(shape).astype(npy_label.dtype)
             return npy_image, npy_label
 
@@ -183,7 +214,10 @@ class DataAugmentor(object):
         y_max = int(np.min([image_height, y_max]))
         x_max = int(np.min([image_width, x_max]))
 
-        return npy_image[z_min: z_max, y_min: y_max, x_min: x_max], npy_label[z_min: z_max, y_min: y_max, x_min: x_max]
+        return (
+            npy_image[z_min:z_max, y_min:y_max, x_min:x_max],
+            npy_label[z_min:z_max, y_min:y_max, x_min:x_max],
+        )
 
     @staticmethod
     def random_crop_to_extend_labels(npy_image, npy_label, max_extend=(20, 20, 20)):
@@ -197,12 +231,12 @@ class DataAugmentor(object):
         [max_d, max_h, max_w] = np.max(np.array(indices), axis=1)
         [min_d, min_h, min_w] = np.min(np.array(indices), axis=1)
 
-        extend_z_start = np.random.randint(-max_extend[0]//3, max_extend[0])
-        extend_y_start = np.random.randint(-max_extend[1]//3, max_extend[1])
-        extend_x_start = np.random.randint(-max_extend[2]//3, max_extend[2])
-        extend_z_end = np.random.randint(-max_extend[0]//3, max_extend[0])
-        extend_y_end = np.random.randint(-max_extend[1]//3, max_extend[1])
-        extend_x_end = np.random.randint(-max_extend[2]//3, max_extend[2])
+        extend_z_start = np.random.randint(-max_extend[0] // 3, max_extend[0])
+        extend_y_start = np.random.randint(-max_extend[1] // 3, max_extend[1])
+        extend_x_start = np.random.randint(-max_extend[2] // 3, max_extend[2])
+        extend_z_end = np.random.randint(-max_extend[0] // 3, max_extend[0])
+        extend_y_end = np.random.randint(-max_extend[1] // 3, max_extend[1])
+        extend_x_end = np.random.randint(-max_extend[2] // 3, max_extend[2])
 
         z_min = int(min_d + extend_z_start)
         y_min = int(min_h + extend_y_start)
@@ -220,10 +254,15 @@ class DataAugmentor(object):
         y_max = int(np.min([image_height, y_max]))
         x_max = int(np.min([image_width, x_max]))
 
-        return npy_image[z_min: z_max, y_min: y_max, x_min: x_max], npy_label[z_min: z_max, y_min: y_max, x_min: x_max]
+        return (
+            npy_image[z_min:z_max, y_min:y_max, x_min:x_max],
+            npy_label[z_min:z_max, y_min:y_max, x_min:x_max],
+        )
 
     @staticmethod
-    def augment_brightness_additive(npy_image, npy_label, labels=None, additive_range=(-200, 200)):
+    def augment_brightness_additive(
+        npy_image, npy_label, labels=None, additive_range=(-200, 200)
+    ):
         if labels is None:
             labels = [1]
 
@@ -235,7 +274,9 @@ class DataAugmentor(object):
         return npy_image
 
     @staticmethod
-    def augment_brightness_multiplicative(npy_image, npy_label, labels=None, multiplier_range=(0.75, 1.25)):
+    def augment_brightness_multiplicative(
+        npy_image, npy_label, labels=None, multiplier_range=(0.75, 1.25)
+    ):
         if labels is None:
             labels = [1]
 

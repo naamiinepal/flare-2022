@@ -229,5 +229,7 @@ submissions
 *.ckpt
 *.pt
 *logs
+*ts
 
-!flare_supervised_checkpoint.pt
+!coarse_boundingmask_semi.ts
+!fine_flare_model_final.ts

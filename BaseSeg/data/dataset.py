@@ -226,11 +226,12 @@ class SegDataSet(Dataset):
         ]
         if self.cfg.DATA_LOADER.IS_COARSE and self.cfg.COARSE_MODEL.NUM_CLASSES == 1:
             npy_mask[npy_mask != 0] = 1
-            mask_czyx = npy_mask[
-                np.newaxis,
-            ].astype(np.uint8)
-        else:
-            mask_czyx = convert_mask_2_one_hot(npy_mask, self.label)
+        # else:
+        # mask_czyx = convert_mask_2_one_hot(npy_mask, self.label)
+
+        mask_czyx = npy_mask[
+            np.newaxis,
+        ].astype(np.uint8)
 
         if self.cfg.FINE_MODEL.AUXILIARY_TASK:
             is_single_channel = (
